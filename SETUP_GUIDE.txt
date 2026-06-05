@@ -1,0 +1,192 @@
+=========================================================
+  SMC OB CONFLUENCE — AUTO ENGINE VERSION
+  No TradingView. No webhooks. No monthly fee.
+  Your server computes the SMC signals itself.
+=========================================================
+
+HOW THIS VERSION WORKS:
+  • Fetches live 4H + 15m candles from Twelve Data (free API)
+  • Runs a Python port of the LuxAlgo SMC logic on your server
+  • Detects 4H order blocks + 15m structure (BOS/CHoCH)
+  • Flags pairs where price is inside a 4H OB and 15m aligns
+  • Updates the dashboard automatically every few minutes
+
+You already have Railway + GitHub set up from before, so this
+is mostly REPLACING your old files with these new ones.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — GET A FREE TWELVE DATA API KEY (3 min)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+① Go to twelvedata.com → Sign up (free, no card needed)
+② After signing in, go to your Dashboard
+③ Copy your API KEY (long string of letters/numbers)
+④ Keep it handy — you'll paste it into Railway in Step 4
+
+FREE TIER LIMITS (important):
+  • 8 API credits per minute
+  • 800 API credits per day
+  • Each pair scan = 2 credits (one 4H call + one 15m call)
+  → 6 pairs every 5 min ≈ 6×2×12×24 = stays under 800/day if
+    you scan every 5+ minutes. Don't scan too many pairs too fast.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — REPLACE FILES ON GITHUB (5 min)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Go to your existing "smc-dashboard" repo on GitHub.
+
+You need to ADD/REPLACE these files:
+  server.py            ← REPLACE (this is the new engine version)
+  smc_engine.py        ← NEW file (the SMC detection logic)
+  requirements.txt     ← same as before (no change needed)
+  Procfile             ← REPLACE (now uses 1 worker)
+  templates/dashboard.html  ← REPLACE
+
+Easiest way on mobile:
+① Open your repo → tap a file (e.g. server.py) → tap pencil ✏ to edit
+② Delete all, paste the new content → Commit
+③ Repeat for each file
+
+OR delete the repo and re-upload everything fresh from this folder
+(simpler if you're comfortable — just keep the repo NAME the same).
+
+REMEMBER: smc_engine.py is a NEW file you must add — the server
+won't work without it.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — RAILWAY AUTO-REDEPLOYS (1 min)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once you commit to GitHub, Railway automatically rebuilds.
+Watch: Railway → your project → Deployments → wait for "Success".
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — ADD YOUR SETTINGS IN RAILWAY (3 min)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Railway → your project → Variables tab → add these:
+
+  TWELVE_DATA_KEY   = (paste your Twelve Data key)
+
+  PAIRS             = GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD
+                      (use the format with the slash. Add/remove pairs
+                       but keep it to ~6 max on the free tier)
+
+  SCAN_INTERVAL     = 300
+                      (seconds between scans. 300 = every 5 min.
+                       Lower = more API credits used. Don't go below 120.)
+
+After adding variables, Railway redeploys again automatically.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 5 — OPEN YOUR DASHBOARD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open your Railway URL (same as before):
+  https://web-production-ac7a2.up.railway.app
+
+The status line at the top right shows the engine working:
+  "SCAN: 6 pairs | 30s ago | 12 credits"
+
+Tap "⚡ SCAN NOW" to force an immediate scan.
+
+First scan takes ~30-60 seconds (it fetches all pairs).
+If a pair's price is inside a 4H OB right now, a card appears.
+If no pairs are in an OB, you'll see "NO SIGNALS" — which is
+correct and expected most of the time.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO READ IT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A card appears ONLY when price is currently inside a 4H order block.
+  • Green card = bullish 4H OB (demand zone) — price dipped into it
+  • Red card   = bearish 4H OB (supply zone) — price rallied into it
+  • "15m struct" filled in = the 15m timeframe confirms the same
+    direction (higher confluence). If blank, OB hit but 15m not yet aligned.
+  • OB Depth   = how deep price is into the zone
+
+This matches what you'd manually look for: HTF 4H AOI + LTF 15m alignment.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANT — ACCURACY NOTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a PYTHON PORT of the LuxAlgo logic. It uses the same
+method (leg-based swing pivots, BOS/CHoCH, extreme-candle order
+blocks) but it will NOT be pixel-perfect identical to your
+TradingView chart because:
+  • TradingView and Twelve Data may have slightly different candle
+    data (different liquidity providers / closing times)
+  • Floating point and bar-indexing differences
+  • The OB selection picks the extreme candle in the leg, same as
+    LuxAlgo, but edge cases can differ
+
+USE IT AS A SCANNER / SHORTLIST, then confirm the setup on your
+actual TradingView chart before trading. Treat it as "these pairs
+are worth a look right now," not as a final trade trigger.
+
+If you find a pair flagging differently from your chart, compare
+and let me know — the swing_length / internal_length parameters
+can be tuned to match your chart settings (currently 50 / 5,
+matching the LuxAlgo defaults).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TUNING (optional)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In smc_engine.py the engine is created with:
+  SMCEngine(swing_length=50, internal_length=5)
+
+These match LuxAlgo's defaults (Swing = 50, Internal = 5).
+If your TradingView indicator uses different values, edit the
+matching line near the top of server.py:
+  engine = SMCEngine(swing_length=50, internal_length=5)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Status shows "No TWELVE_DATA_KEY set"
+  → Add the TWELVE_DATA_KEY variable in Railway (Step 4)
+
+Status shows an API error / "credits"
+  → You may have hit the 800/day or 8/min free limit
+  → Increase SCAN_INTERVAL or reduce number of PAIRS
+
+Dashboard loads but never shows signals
+  → This is normal if no pair is currently inside a 4H OB
+  → Tap SCAN NOW and check the status line updates
+  → Visit /status in browser to see diagnostics & last_error
+
+Railway build fails
+  → Make sure smc_engine.py was added (server imports from it)
+  → Check templates/dashboard.html is inside templates/ folder
+
+Pairs not matching TradingView
+  → Expected (see accuracy note). Use as shortlist + confirm on chart.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FILES IN THIS FOLDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  server.py               ← Main server + price fetcher + scan loop
+  smc_engine.py           ← SMC detection logic (ported from LuxAlgo)
+  requirements.txt        ← Python packages
+  Procfile                ← Railway start command (1 worker!)
+  templates/
+    dashboard.html        ← The dashboard
+  SETUP_GUIDE.txt         ← This file
+
+=========================================================
