@@ -39,6 +39,7 @@ engine = SMCEngine(swing_length=50, internal_length=5)
 
 # ── Shared state ──
 signals = []          # current live signals shown on dashboard
+watchlist = []        # pairs approaching an OB (not yet inside)
 scan_log = {          # diagnostics shown in dashboard footer
     'last_scan': None,
     'last_error': None,
@@ -100,6 +101,7 @@ def fetch_candles(symbol, interval, outputsize):
 # ── Scan all pairs once ──
 def scan_once():
     new_signals = []
+    watch = []
     scanned = 0
 
     scan_log['scanning'] = True
@@ -123,8 +125,18 @@ def scan_once():
         if res is None:
             continue
 
-        # Only emit a signal if price is inside a 4H OB
+        # If NOT in an OB, add to the watchlist if there's a nearby OB
         if not res.in_ob:
+            if res.near_distance_pips is not None:
+                watch.append({
+                    'pair':     symbol.replace('/', ''),
+                    'price':    round(res.price, 5),
+                    'bias':     'bull' if res.near_ob_bias == BULLISH else 'bear',
+                    'obType':   res.near_ob_type,
+                    'obHigh':   round(res.near_ob_high, 5),
+                    'obLow':    round(res.near_ob_low, 5),
+                    'distancePips': res.near_distance_pips,
+                })
             continue
 
         # Confirm 15m structure aligns with OB bias
@@ -156,9 +168,15 @@ def scan_once():
         }
         new_signals.append(sig)
 
+    # sort watchlist by closest first, keep top 12
+    watch.sort(key=lambda w: w['distancePips'])
+    watch_top = watch[:12]
+
     with _lock:
         signals.clear()
         signals.extend(new_signals)
+        watchlist.clear()
+        watchlist.extend(watch_top)
         scan_log['last_scan'] = datetime.now(timezone.utc).isoformat()
         scan_log['pairs_scanned'] = scanned
         scan_log['scanning'] = False
@@ -202,6 +220,11 @@ def dashboard():
 def get_signals():
     with _lock:
         return jsonify(signals)
+
+@app.route('/watchlist')
+def get_watchlist():
+    with _lock:
+        return jsonify(watchlist)
 
 @app.route('/status')
 def status():
