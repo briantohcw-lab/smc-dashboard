@@ -71,6 +71,13 @@ class SMCResult:
     sweep_level: float = None        # the level that was swept
     confluence: int = 0              # total score 1-5
     factors: list = None             # human-readable list of met factors
+    # ── nearest-OB watchlist (when NOT currently in an OB) ──
+    near_ob_bias: int = 0            # bias of nearest OB
+    near_ob_high: float = None
+    near_ob_low: float = None
+    near_ob_type: str = None
+    near_distance: float = None      # absolute price distance to nearest OB edge
+    near_distance_pips: float = None # distance expressed in pips
 
 
 class SMCEngine:
@@ -446,4 +453,40 @@ class SMCEngine:
             result.confluence = score
             result.factors = factors
 
+        else:
+            # ── Not in an OB: find the NEAREST live OB for the watchlist ──
+            all_obs = [(ob, 'Swing') for ob in obs4_swing] + \
+                      [(ob, 'Internal') for ob in obs4_int]
+            best = None
+            best_dist = None
+            for ob, ob_type in all_obs:
+                # distance to the nearest edge of the zone
+                if price > ob.high:
+                    d = price - ob.high
+                elif price < ob.low:
+                    d = ob.low - price
+                else:
+                    d = 0.0
+                if best_dist is None or d < best_dist:
+                    best_dist = d
+                    best = (ob, ob_type)
+
+            if best is not None:
+                ob, ob_type = best
+                pip = self._pip_size(pair)
+                result.near_ob_bias = ob.bias
+                result.near_ob_high = ob.high
+                result.near_ob_low = ob.low
+                result.near_ob_type = ob_type
+                result.near_distance = best_dist
+                result.near_distance_pips = round(best_dist / pip, 1) if pip else None
+
         return result
+
+    @staticmethod
+    def _pip_size(pair):
+        p = pair.replace('/', '').upper()
+        if 'JPY' in p:  return 0.01
+        if 'XAU' in p:  return 0.10
+        if 'XAG' in p:  return 0.001
+        return 0.0001
