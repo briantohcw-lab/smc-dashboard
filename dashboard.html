@@ -344,6 +344,7 @@
     <button class="filter-btn active" id="cf-0" onclick="setConf(0)">ANY</button>
     <button class="filter-btn"        id="cf-2" onclick="setConf(2)">2+</button>
     <button class="filter-btn"        id="cf-3" onclick="setConf(3)">3+</button>
+    <button class="filter-btn"        id="cf-4" onclick="setConf(4)">4+</button>
   </div>
   <div class="right-controls">
     <span id="lastUpdateEl">—</span>
@@ -366,7 +367,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:var(--bull)"></div>4H Bullish OB + 15m align ↑</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--bear)"></div>4H Bearish OB + 15m align ↓</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div>High confluence 3+</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Dots = confluence score /4</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Dots = confluence score /5</div>
 </div>
 
 <!-- ── MAIN GRID ───────────────────────────────────── -->
@@ -463,11 +464,14 @@ function depth(s) {
 }
 
 function conf(s) {
+  // Use server-computed confluence if present (out of 5)
+  if (typeof s.confluence === 'number') return s.confluence;
   let sc = 1;
   if (s.m15struct) sc++;
   if (s.fvg)  sc++;
   if (s.eqhl) sc++;
-  return Math.min(sc, 4);
+  if (s.sweep) sc++;
+  return Math.min(sc, 5);
 }
 
 function ago(iso) {
@@ -520,18 +524,18 @@ function render() {
 function emptyCol(dir) {
   return `<div class="empty-col">
     NO ${dir} SIGNALS
-    <div class="pulse-text">WAITING FOR TRADINGVIEW ALERTS...</div>
+    <div class="pulse-text">SCANNING FOR OB CONFLUENCE...</div>
   </div>`;
 }
 
 function card(s) {
   const c   = conf(s);
   const dep = depth(s);
-  const pct = Math.round((c/4)*100);
+  const pct = Math.round((c/5)*100);
   const fr  = isFresh(s.receivedAt);
   const mc  = s.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
 
-  const dots = [1,2,3,4].map(i =>
+  const dots = [1,2,3,4,5].map(i =>
     `<div class="dot ${i<=c?'on '+s.bias:''}"></div>`
   ).join('');
 
@@ -548,6 +552,7 @@ function card(s) {
       <span class="tf-tag">${s.timeframe||'4H'}</span>
     </div>
     <div class="conf-track"><div class="conf-fill" style="width:${pct}%"></div></div>
+    ${s.factors && s.factors.length ? `<div style="padding:0 12px 8px;display:flex;gap:4px;flex-wrap:wrap">` + s.factors.map(f=>`<span style="font-size:8px;padding:1px 6px;border-radius:1px;background:rgba(59,130,246,0.12);color:var(--accent);border:1px solid rgba(59,130,246,0.25)">${f}</span>`).join('') + `</div>` : ''}
     <div class="card-grid">
       <div>
         <div class="m-lbl">PRICE</div>
@@ -577,7 +582,7 @@ function card(s) {
       </div>
     </div>
     <div class="card-foot">
-      <span style="color:${c>=3?'var(--warn)':'var(--dim)'}">CONF ${c}/4</span>
+      <span style="color:${c>=3?'var(--warn)':'var(--dim)'}">CONF ${c}/5</span>
       <div class="dots">${dots}</div>
     </div>
   </div>`;
@@ -609,9 +614,11 @@ function showTip(e, enc) {
       <span class="tv" style="color:${s.fvg?'var(--bull)':'var(--dim)'}">${s.fvg?'YES':'NO'}</span></div>
     <div class="tr"><span class="tl">EQH/EQL Near</span>
       <span class="tv" style="color:${s.eqhl?'var(--bull)':'var(--dim)'}">${s.eqhl?'YES':'NO'}</span></div>
+    <div class="tr"><span class="tl">Liquidity Sweep</span>
+      <span class="tv" style="color:${s.sweep?'var(--warn)':'var(--dim)'}">${s.sweep?'YES':'NO'}</span></div>
     <div class="tdiv"></div>
     <div class="tr"><span class="tl">Confluence</span>
-      <span class="tv" style="color:${c>=3?'var(--warn)':'var(--text)'}">${c}/4</span></div>
+      <span class="tv" style="color:${c>=3?'var(--warn)':'var(--text)'}">${c}/5</span></div>
     <div class="tr"><span class="tl">Received</span> <span class="tv">${ago(s.receivedAt)}</span></div>
   `;
 
@@ -639,7 +646,7 @@ function setOB(v) {
 }
 function setConf(n) {
   cfF = n;
-  [0,2,3].forEach(x => document.getElementById('cf-'+x).className='filter-btn');
+  [0,2,3,4].forEach(x => document.getElementById('cf-'+x).className='filter-btn');
   document.getElementById('cf-'+n).classList.add('active');
   render();
 }
