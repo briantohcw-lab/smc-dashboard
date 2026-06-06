@@ -371,6 +371,17 @@
 </div>
 
 <!-- ── MAIN GRID ───────────────────────────────────── -->
+<!-- ── SCAN PROGRESS ── -->
+<div id="scanProgressWrap" style="display:none;padding:6px 24px;border-bottom:1px solid var(--border);background:rgba(59,130,246,0.05)">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span id="scanProgressText" style="font-size:9px;color:var(--accent);letter-spacing:0.12em;white-space:nowrap">SCANNING...</span>
+    <div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
+      <div id="scanProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--bull));transition:width 0.4s ease"></div>
+    </div>
+    <span id="scanProgressPct" style="font-size:9px;color:var(--text2);white-space:nowrap">0%</span>
+  </div>
+</div>
+
 <main>
   <div class="bull-col">
     <div class="section-label">▲ BULLISH SETUPS <span class="count-pill" id="bc">0</span></div>
@@ -435,8 +446,9 @@ async function doFetch() {
 
 // ── Trigger immediate scan ──────────────────────────
 async function doScanNow() {
-  toast('⚡ Scan triggered — results in ~30s');
+  toast('⚡ Scan started — watch the progress bar');
   try { await fetch(API + '/scan-now'); } catch(e) {}
+  setTimeout(pollStatus, 800);  // start tracking progress quickly
 }
 
 // ── Helpers ─────────────────────────────────────────
@@ -686,22 +698,49 @@ setInterval(tick, 1000);
 doFetch();
 setInterval(doFetch, 5000);
 pollStatus();
-setInterval(pollStatus, 15000);
 render();
 
+let statusTimer = null;
 async function pollStatus() {
   try {
     const r = await fetch(API + '/status');
     const s = await r.json();
     const log = s.log || {};
-    let txt = `SCAN: ${s.pairs ? s.pairs.length : 0} pairs`;
-    if (log.last_scan) {
-      const ago = Math.floor((Date.now() - new Date(log.last_scan))/1000);
-      txt += ` | ${ago}s ago | ${log.credits_used_today||0} credits`;
+
+    const wrap = document.getElementById('scanProgressWrap');
+    const bar  = document.getElementById('scanProgressBar');
+    const pct  = document.getElementById('scanProgressPct');
+    const ptxt = document.getElementById('scanProgressText');
+
+    if (log.scanning) {
+      // show progress bar, poll fast
+      const done = log.progress || 0;
+      const tot  = log.total_pairs || (s.pairs ? s.pairs.length : 1);
+      const percent = Math.round((done/tot)*100);
+      wrap.style.display = 'block';
+      bar.style.width = percent + '%';
+      pct.textContent = percent + '%';
+      ptxt.textContent = `SCANNING ${done}/${tot}` + (log.current_pair ? ` — ${log.current_pair}` : '');
+      document.getElementById('pollStatus').textContent = `SCANNING ${done}/${tot} PAIRS`;
+      schedulePoll(1500);   // poll every 1.5s while scanning
+    } else {
+      // hide progress bar, poll slow
+      wrap.style.display = 'none';
+      let txt = `SCAN: ${s.pairs ? s.pairs.length : 0} pairs`;
+      if (log.last_scan) {
+        const ago = Math.floor((Date.now() - new Date(log.last_scan))/1000);
+        txt += ` | ${ago}s ago | ${log.credits_used_today||0} credits`;
+      }
+      if (log.last_error) txt += ` | WARN ${log.last_error.slice(0,40)}`;
+      document.getElementById('pollStatus').textContent = txt;
+      schedulePoll(15000);  // poll every 15s when idle
     }
-    if (log.last_error) txt += ` | WARN ${log.last_error.slice(0,40)}`;
-    document.getElementById('pollStatus').textContent = txt;
-  } catch(e) {}
+  } catch(e) { schedulePoll(15000); }
+}
+
+function schedulePoll(ms) {
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(pollStatus, ms);
 }
 </script>
 </body>
