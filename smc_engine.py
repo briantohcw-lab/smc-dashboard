@@ -64,6 +64,13 @@ class SMCResult:
     last_structure_bias: int = 0
     swing_trend: int = 0
     internal_trend: int = 0
+    # ── extra confluence factors ──
+    fvg: bool = False                # Fair Value Gap supporting the OB direction
+    eqhl: bool = False               # Equal highs/lows (liquidity) near the zone
+    liquidity_sweep: bool = False    # recent sweep of a prior high/low (stop hunt)
+    sweep_level: float = None        # the level that was swept
+    confluence: int = 0              # total score 1-5
+    factors: list = None             # human-readable list of met factors
 
 
 class SMCEngine:
@@ -248,6 +255,91 @@ class SMCEngine:
                 live.append(ob)
         return live
 
+    # ── Fair Value Gap detection (LuxAlgo 3-candle method) ──
+    def _detect_fvg(self, candles, bias, near_price, tolerance):
+        """
+        A bullish FVG = gap where candle[i-2].high < candle[i].low (price jumped up
+        leaving an unfilled gap). Bearish FVG = candle[i-2].low > candle[i].high.
+        We look for an unfilled FVG in the OB direction near the current price.
+        Returns True if a supporting FVG exists near the zone.
+        """
+        n = len(candles)
+        for i in range(n - 1, 1, -1):
+            c0 = candles[i]       # current
+            c2 = candles[i-2]     # two bars back
+            if bias == BULLISH:
+                # bullish gap: top of gap = c0.low, bottom = c2.high
+                if c0.low > c2.high:
+                    gap_top, gap_bot = c0.low, c2.high
+                    # unfilled = price hasn't traded back below gap bottom since
+                    filled = any(candles[j].low < gap_bot for j in range(i+1, n))
+                    if not filled and abs(near_price - gap_bot) < tolerance * 3:
+                        return True
+            else:
+                # bearish gap: top = c2.low, bottom = c0.high
+                if c2.low > c0.high:
+                    gap_top, gap_bot = c2.low, c0.high
+                    filled = any(candles[j].high > gap_top for j in range(i+1, n))
+                    if not filled and abs(near_price - gap_top) < tolerance * 3:
+                        return True
+        return False
+
+    # ── Equal Highs / Equal Lows (liquidity pools) ──
+    def _detect_eqhl(self, candles, bias, near_price, tolerance):
+        """
+        Equal highs (resting liquidity above) or equal lows (below).
+        For a bullish setup we look for equal LOWS near/below price (buy-side
+        liquidity that was or will be swept). For bearish, equal HIGHS.
+        Two swing points within `tolerance` of each other count as equal.
+        """
+        recent = candles[-60:] if len(candles) > 60 else candles
+        if bias == BULLISH:
+            lows = [c.low for c in recent]
+            for i in range(len(lows)):
+                for j in range(i+1, len(lows)):
+                    if abs(lows[i] - lows[j]) < tolerance * 0.5:
+                        if abs(near_price - lows[i]) < tolerance * 4:
+                            return True
+        else:
+            highs = [c.high for c in recent]
+            for i in range(len(highs)):
+                for j in range(i+1, len(highs)):
+                    if abs(highs[i] - highs[j]) < tolerance * 0.5:
+                        if abs(near_price - highs[i]) < tolerance * 4:
+                            return True
+        return False
+
+    # ── Liquidity sweep (stop hunt) ──
+    def _detect_sweep(self, candles, bias, tolerance):
+        """
+        A liquidity sweep = price briefly pierces a prior swing high/low (taking
+        stops) then closes back inside, signalling a reversal. This is a strong
+        SMC confluence: smart money grabbed liquidity before the real move.
+        For a BULLISH setup we want a sweep BELOW a prior low then close back up.
+        For a BEARISH setup, a sweep ABOVE a prior high then close back down.
+        Checks the last few candles.
+        Returns (swept: bool, level: float|None).
+        """
+        if len(candles) < 12:
+            return False, None
+        recent = candles[-6:]      # look at last 6 bars for the sweep
+        prior  = candles[-30:-6] if len(candles) >= 30 else candles[:-6]
+        if not prior:
+            return False, None
+
+        if bias == BULLISH:
+            prior_low = min(c.low for c in prior)
+            for c in recent:
+                # wick pierces below prior low but candle closes back above it
+                if c.low < prior_low and c.close > prior_low:
+                    return True, prior_low
+        else:
+            prior_high = max(c.high for c in prior)
+            for c in recent:
+                if c.high > prior_high and c.close < prior_high:
+                    return True, prior_high
+        return False, None
+
     def analyze(self, pair, candles_4h, candles_15m) -> Optional[SMCResult]:
         """
         Main entry point.
@@ -313,5 +405,45 @@ class SMCEngine:
             result.ob_type = hit_type
             result.last_structure = last_struct_15
             result.last_structure_bias = last_struct_bias_15
+
+            # tolerance based on ATR of the 4H series (zone width proxy)
+            atr4 = self._atr(candles_4h, 14)
+            tol = atr4[-1] if atr4 else (hit_ob.high - hit_ob.low)
+
+            ob_bull = (hit_ob.bias == BULLISH)
+
+            # Factor 2: 15m structure aligned
+            struct_aligned = bool(
+                last_struct_15 and (
+                    (ob_bull and last_struct_bias_15 == BULLISH) or
+                    (not ob_bull and last_struct_bias_15 == BEARISH)
+                )
+            )
+
+            # Factor 3: FVG supporting the OB direction (check on 15m, near price)
+            result.fvg = self._detect_fvg(candles_15m, hit_ob.bias, price, tol)
+
+            # Factor 4: Equal highs/lows liquidity near the zone (on 4H)
+            result.eqhl = self._detect_eqhl(candles_4h, hit_ob.bias, price, tol)
+
+            # Factor 5: Liquidity sweep / stop hunt (on 15m for entry timing)
+            swept, swept_level = self._detect_sweep(candles_15m, hit_ob.bias, tol)
+            result.liquidity_sweep = swept
+            result.sweep_level = swept_level
+
+            # ── Total confluence score (max 5) ──
+            factors = ['4H OB']
+            score = 1
+            if struct_aligned:
+                score += 1; factors.append('15m ' + (last_struct_15 or 'aligned'))
+            if result.fvg:
+                score += 1; factors.append('FVG')
+            if result.eqhl:
+                score += 1; factors.append('EQH/EQL')
+            if result.liquidity_sweep:
+                score += 1; factors.append('Liquidity Sweep')
+
+            result.confluence = score
+            result.factors = factors
 
         return result
