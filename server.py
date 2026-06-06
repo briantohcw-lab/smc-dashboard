@@ -44,6 +44,10 @@ scan_log = {          # diagnostics shown in dashboard footer
     'last_error': None,
     'pairs_scanned': 0,
     'credits_used_today': 0,
+    'scanning': False,
+    'progress': 0,
+    'total_pairs': 0,
+    'current_pair': None,
 }
 _lock = threading.Lock()
 
@@ -98,12 +102,18 @@ def scan_once():
     new_signals = []
     scanned = 0
 
-    for symbol in PAIRS:
+    scan_log['scanning'] = True
+    scan_log['progress'] = 0
+    scan_log['total_pairs'] = len(PAIRS)
+
+    for idx, symbol in enumerate(PAIRS):
+        scan_log['current_pair'] = symbol
         c4 = fetch_candles(symbol, '4h', HTF_BARS)
         time.sleep(1)  # gentle on rate limit
         c15 = fetch_candles(symbol, '15min', LTF_BARS)
         time.sleep(1)
         scan_log['credits_used_today'] += 2
+        scan_log['progress'] = idx + 1
 
         if not c4 or not c15:
             continue
@@ -151,6 +161,8 @@ def scan_once():
         signals.extend(new_signals)
         scan_log['last_scan'] = datetime.now(timezone.utc).isoformat()
         scan_log['pairs_scanned'] = scanned
+        scan_log['scanning'] = False
+        scan_log['current_pair'] = None
 
 
 # ── Background scan loop ──
