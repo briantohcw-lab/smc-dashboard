@@ -317,34 +317,84 @@ class SMCEngine:
         return False
 
     # ── Liquidity sweep (stop hunt) ──
-    def _detect_sweep(self, candles, bias, tolerance):
+    def _swing_levels(self, candles, left=2, right=2):
         """
-        A liquidity sweep = price briefly pierces a prior swing high/low (taking
-        stops) then closes back inside, signalling a reversal. This is a strong
-        SMC confluence: smart money grabbed liquidity before the real move.
-        For a BULLISH setup we want a sweep BELOW a prior low then close back up.
-        For a BEARISH setup, a sweep ABOVE a prior high then close back down.
-        Checks the last few candles.
+        Return lists of confirmed swing-high and swing-low prices.
+        A swing high = a bar whose high is >= the `left` bars before and
+        `right` bars after it (fractal pivot). Same for swing low.
+        These are the levels where real liquidity (stops) tends to rest.
+        """
+        highs, lows = [], []
+        n = len(candles)
+        for i in range(left, n - right):
+            h = candles[i].high
+            l = candles[i].low
+            # strict: the pivot must be strictly higher/lower than at least one
+            # neighbor on each side (not just equal), so flat ranges don't count
+            is_high = all(candles[i-k].high <= h for k in range(1, left+1)) and \
+                      all(candles[i+k].high <= h for k in range(1, right+1)) and \
+                      any(candles[i-k].high <  h for k in range(1, left+1)) and \
+                      any(candles[i+k].high <  h for k in range(1, right+1))
+            is_low  = all(candles[i-k].low  >= l for k in range(1, left+1)) and \
+                      all(candles[i+k].low  >= l for k in range(1, right+1)) and \
+                      any(candles[i-k].low  >  l for k in range(1, left+1)) and \
+                      any(candles[i+k].low  >  l for k in range(1, right+1))
+            if is_high:
+                highs.append((i, h))
+            if is_low:
+                lows.append((i, l))
+        return highs, lows
+
+    def _detect_sweep(self, candles, bias, tolerance, zone_ref=None):
+        """
+        A liquidity sweep = price pierces a CONFIRMED SWING level (where stops
+        rest) then closes back inside — a stop hunt before the real move.
+
+        Tightened rules (vs the old loose version):
+          1. The swept level must be an actual swing pivot (fractal), not just
+             any prior bar's extreme.
+          2. The sweep must have happened in the last few bars.
+          3. If zone_ref (the OB level near price) is given, the swept level
+             must be reasonably near that zone — so we only count sweeps of the
+             RELEVANT liquidity, not random noise elsewhere on the chart.
+
+        For BULLISH: a swing LOW is pierced (wick below) then close back above.
+        For BEARISH: a swing HIGH is pierced (wick above) then close back below.
         Returns (swept: bool, level: float|None).
         """
-        if len(candles) < 12:
-            return False, None
-        recent = candles[-6:]      # look at last 6 bars for the sweep
-        prior  = candles[-30:-6] if len(candles) >= 30 else candles[:-6]
-        if not prior:
+        n = len(candles)
+        if n < 12:
             return False, None
 
+        recent_start = n - 5          # only the last 5 bars can be the sweep bar
+        near_tol = tolerance * 5 if tolerance else None
+
+        # Find swing pivots ONLY in the prior window (exclude the recent bars,
+        # so the sweep bar itself can't be mistaken for the level it sweeps).
+        prior = candles[:recent_start]
+        if len(prior) < 6:
+            return False, None
+        highs, lows = self._swing_levels(prior, left=2, right=2)
+
         if bias == BULLISH:
-            prior_low = min(c.low for c in prior)
-            for c in recent:
-                # wick pierces below prior low but candle closes back above it
-                if c.low < prior_low and c.close > prior_low:
-                    return True, prior_low
+            cand = [lv for (idx, lv) in lows]
+            if not cand:
+                return False, None
+            for c in candles[recent_start:]:
+                for lv in cand:
+                    # wick pierces below the swing low, close reclaims above it
+                    if c.low < lv and c.close > lv:
+                        if zone_ref is None or abs(lv - zone_ref) < near_tol:
+                            return True, lv
         else:
-            prior_high = max(c.high for c in prior)
-            for c in recent:
-                if c.high > prior_high and c.close < prior_high:
-                    return True, prior_high
+            cand = [hv for (idx, hv) in highs]
+            if not cand:
+                return False, None
+            for c in candles[recent_start:]:
+                for hv in cand:
+                    if c.high > hv and c.close < hv:
+                        if zone_ref is None or abs(hv - zone_ref) < near_tol:
+                            return True, hv
         return False, None
 
     def analyze(self, pair, candles_4h, candles_15m) -> Optional[SMCResult]:
@@ -433,8 +483,11 @@ class SMCEngine:
             # Factor 4: Equal highs/lows liquidity near the zone (on 4H)
             result.eqhl = self._detect_eqhl(candles_4h, hit_ob.bias, price, tol)
 
-            # Factor 5: Liquidity sweep / stop hunt (on 15m for entry timing)
-            swept, swept_level = self._detect_sweep(candles_15m, hit_ob.bias, tol)
+            # Factor 5: Liquidity sweep / stop hunt (on 15m for entry timing).
+            # Pass the OB edge as zone_ref so only sweeps of liquidity NEAR the
+            # zone count — not random wicks elsewhere on the chart.
+            zone_ref = hit_ob.low if ob_bull else hit_ob.high
+            swept, swept_level = self._detect_sweep(candles_15m, hit_ob.bias, tol, zone_ref)
             result.liquidity_sweep = swept
             result.sweep_level = swept_level
 
