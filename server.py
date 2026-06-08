@@ -16,7 +16,7 @@ Set these as Railway environment variables:
 from flask import Flask, jsonify, Response
 from flask_cors import CORS
 from datetime import datetime, timezone
-import os, time, threading, urllib.request, urllib.parse, json
+import os, time, threading, urllib.request, urllib.parse, urllib.error, json
 
 from smc_engine import SMCEngine, Candle, BULLISH, BEARISH
 
@@ -59,6 +59,7 @@ def fetch_candles(symbol, interval, outputsize):
     """
     Returns list[Candle] oldest-first, or None on error.
     interval: '4h' or '15min'
+    Retries once on HTTP 429 (rate limit) after a 60s wait.
     """
     params = urllib.parse.urlencode({
         'symbol': symbol,
@@ -69,15 +70,32 @@ def fetch_candles(symbol, interval, outputsize):
         'order': 'ASC',
     })
     url = f'https://api.twelvedata.com/time_series?{params}'
-    try:
-        with urllib.request.urlopen(url, timeout=20) as r:
-            data = json.loads(r.read().decode())
-    except Exception as e:
-        scan_log['last_error'] = f'{symbol} fetch error: {e}'
+
+    data = None
+    for attempt in range(2):   # initial try + 1 retry on rate limit
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read().decode())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 0:
+                # rate limited — wait for the per-minute window to reset
+                scan_log['last_error'] = f'{symbol}: rate limited, waiting 60s'
+                time.sleep(60)
+                continue
+            scan_log['last_error'] = f'{symbol} fetch error: {e}'
+            return None
+        except Exception as e:
+            scan_log['last_error'] = f'{symbol} fetch error: {e}'
+            return None
+
+    if data is None:
         return None
 
+    # Twelve Data also signals rate limits in the JSON body sometimes
     if data.get('status') == 'error':
-        scan_log['last_error'] = f"{symbol}: {data.get('message','api error')}"
+        msg = data.get('message', 'api error')
+        scan_log['last_error'] = f"{symbol}: {msg}"
         return None
 
     values = data.get('values')
@@ -109,12 +127,18 @@ def scan_once():
     scan_log['progress'] = 0
     scan_log['total_pairs'] = len(PAIRS)
 
+    # Twelve Data FREE tier allows 8 API calls/minute. Each pair = 2 calls
+    # (4h + 15min). To stay safely under the limit we space calls ~8s apart:
+    # 8 calls/min = 1 call per 7.5s. We use 8s to be safe. This makes a full
+    # 28-pair scan take ~7-8 minutes, which is fine for a 2-hour scan cycle.
+    THROTTLE = float(os.environ.get('API_THROTTLE_SEC', '8'))
+
     for idx, symbol in enumerate(PAIRS):
         scan_log['current_pair'] = symbol
         c4 = fetch_candles(symbol, '4h', HTF_BARS)
-        time.sleep(1)  # gentle on rate limit
+        time.sleep(THROTTLE)
         c15 = fetch_candles(symbol, '15min', LTF_BARS)
-        time.sleep(1)
+        time.sleep(THROTTLE)
         scan_log['credits_used_today'] += 2
         scan_log['progress'] = idx + 1
 
@@ -297,11 +321,12 @@ def backtest():
     events = []
     errors = []
 
+    throttle = float(os.environ.get('API_THROTTLE_SEC', '8'))
     for symbol in PAIRS:
         c4_all  = fetch_candles(symbol, '4h', min(htf_needed, 5000))
-        time.sleep(1)
+        time.sleep(throttle)
         c15_all = fetch_candles(symbol, '15min', min(ltf_needed, 5000))
-        time.sleep(1)
+        time.sleep(throttle)
         if not c4_all or not c15_all:
             errors.append(symbol)
             continue
