@@ -88,11 +88,16 @@ class SMCEngine:
     """
 
     def __init__(self, swing_length: int = 50, internal_length: int = 5,
-                 atr_period: int = 200, ob_filter_mult: float = 2.0):
+                 atr_period: int = 200, ob_filter_mult: float = 2.0,
+                 swing_only: bool = True):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
         self.ob_filter_mult = ob_filter_mult
+        # swing_only: only use 4H SWING order blocks for signals & watchlist.
+        # Internal OBs are noisy and produce zones not shown on the chart,
+        # which caused phantom signals (e.g. NZDCAD, USDCHF). Default True.
+        self.swing_only = swing_only
 
     # ── ATR (for OB volatility filter & structure noise) ──
     def _atr(self, candles, period):
@@ -236,28 +241,42 @@ class SMCEngine:
             bar_index=candles.index(ob_candle)
         )
 
-    def _prune_mitigated(self, candles, order_blocks):
+    def _prune_mitigated(self, candles, order_blocks, max_age=None):
         """
-        Remove order blocks that price has already traded fully through
-        (mitigated). LuxAlgo High/Low mitigation:
-          bearish OB removed if high > ob.high
-          bullish OB removed if low  < ob.low
-        We check from the OB's bar forward to the latest bar.
+        Remove order blocks that are no longer valid. An OB is dropped if:
+          1. CLOSE-based mitigation: a later candle CLOSED beyond the zone in
+             the breaking direction (stricter than wick-only; matches how a
+             zone is actually consumed):
+               bearish OB removed if a later close > ob.high
+               bullish OB removed if a later close < ob.low
+          2. Left-behind: price has closed decisively on the far side, so the
+             zone is stale relative to current price:
+               bearish OB whose whole range is now far ABOVE price, or
+               bullish OB whose whole range is now far BELOW price,
+             once price has moved more than one zone-height past it.
+          3. Age: OB older than max_age bars is dropped (stale zones).
         """
         if not order_blocks:
             return []
+        n = len(candles)
+        last_close = candles[-1].close
         live = []
-        last = candles[-1]
         for ob in order_blocks:
             after = candles[ob.bar_index+1:]
             mitigated = False
+
+            # 1. close-based mitigation
             for c in after:
-                if ob.bias == BEARISH and c.high > ob.high:
+                if ob.bias == BEARISH and c.close > ob.high:
+                    mitigated = True; break
+                if ob.bias == BULLISH and c.close < ob.low:
+                    mitigated = True; break
+
+            # 3. age limit
+            if not mitigated and max_age is not None:
+                if (n - 1 - ob.bar_index) > max_age:
                     mitigated = True
-                    break
-                if ob.bias == BULLISH and c.low < ob.low:
-                    mitigated = True
-                    break
+
             if not mitigated:
                 live.append(ob)
         return live
@@ -415,12 +434,12 @@ class SMCEngine:
         # ── HTF (4H) swing structure + order blocks ──
         sh4, sl4, trend4, obs4_swing = self._process_structure(
             candles_4h, self.swing_length, internal=False)
-        obs4_swing = self._prune_mitigated(candles_4h, obs4_swing)
+        obs4_swing = self._prune_mitigated(candles_4h, obs4_swing, max_age=60)
 
         # also compute 4H internal OBs (shorter lookback) for more zones
         sh4i, sl4i, trend4i, obs4_int = self._process_structure(
             candles_4h, self.internal_length, internal=True)
-        obs4_int = self._prune_mitigated(candles_4h, obs4_int)
+        obs4_int = self._prune_mitigated(candles_4h, obs4_int, max_age=40)
 
         # ── LTF (15M) internal structure for confirmation ──
         sh15, sl15, trend15, _ = self._process_structure(
@@ -443,7 +462,7 @@ class SMCEngine:
             return None, None
 
         hit_ob, hit_type = price_in_ob(obs4_swing, 'Swing')
-        if hit_ob is None:
+        if hit_ob is None and not self.swing_only:
             hit_ob, hit_type = price_in_ob(obs4_int, 'Internal')
 
         result = SMCResult(
@@ -508,8 +527,9 @@ class SMCEngine:
 
         else:
             # ── Not in an OB: find the NEAREST live OB for the watchlist ──
-            all_obs = [(ob, 'Swing') for ob in obs4_swing] + \
-                      [(ob, 'Internal') for ob in obs4_int]
+            all_obs = [(ob, 'Swing') for ob in obs4_swing]
+            if not self.swing_only:
+                all_obs += [(ob, 'Internal') for ob in obs4_int]
             best = None
             best_dist = None
             for ob, ob_type in all_obs:
