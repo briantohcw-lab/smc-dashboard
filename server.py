@@ -53,6 +53,44 @@ scan_log = {          # diagnostics shown in dashboard footer
 }
 _lock = threading.Lock()
 
+# Free Twelve Data tier daily limit
+DAILY_CREDIT_LIMIT = int(os.environ.get('DAILY_CREDIT_LIMIT', '800'))
+
+# ── Persistent credit counter (survives restarts, resets each UTC day) ──
+# Railway's filesystem is ephemeral across redeploys but stable across
+# in-process restarts; we persist to /tmp so a worker restart doesn't lose
+# the running daily total. Format: {"date": "YYYY-MM-DD", "credits": N}
+CREDIT_FILE = os.environ.get('CREDIT_FILE', '/tmp/smc_credits.json')
+
+def _load_credits():
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        with open(CREDIT_FILE) as f:
+            data = json.load(f)
+        if data.get('date') == today:
+            return data.get('credits', 0)
+    except Exception:
+        pass
+    return 0   # new day or no file
+
+def _save_credits(n):
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        with open(CREDIT_FILE, 'w') as f:
+            json.dump({'date': today, 'credits': n}, f)
+    except Exception:
+        pass
+
+def add_credits(n):
+    """Add to today's credit count, persist, and update scan_log."""
+    cur = _load_credits() + n
+    _save_credits(cur)
+    scan_log['credits_used_today'] = cur
+    return cur
+
+# initialise from disk on boot
+scan_log['credits_used_today'] = _load_credits()
+
 
 # ── Fetch candles from Twelve Data ──
 def fetch_candles(symbol, interval, outputsize):
@@ -139,7 +177,7 @@ def scan_once():
         time.sleep(THROTTLE)
         c15 = fetch_candles(symbol, '15min', LTF_BARS)
         time.sleep(THROTTLE)
-        scan_log['credits_used_today'] += 2
+        add_credits(2)
         scan_log['progress'] = idx + 1
 
         if not c4 or not c15:
@@ -235,13 +273,10 @@ def scan_once():
 
 # ── Background scan loop ──
 def scan_loop():
-    # reset daily credit counter at UTC midnight
-    last_day = datetime.now(timezone.utc).date()
+    # daily credit reset is handled by the persistent store (resets when the
+    # UTC date changes); we just refresh the in-memory value each cycle.
     while True:
-        today = datetime.now(timezone.utc).date()
-        if today != last_day:
-            scan_log['credits_used_today'] = 0
-            last_day = today
+        scan_log['credits_used_today'] = _load_credits()
         try:
             scan_once()
         except Exception as e:
@@ -283,12 +318,17 @@ def get_history():
 
 @app.route('/status')
 def status():
+    used = _load_credits()
+    scan_log['credits_used_today'] = used
     return jsonify({
         'running': True,
         'pairs': PAIRS,
         'scan_interval': SCAN_INTERVAL,
         'log': scan_log,
         'signal_count': len(signals),
+        'credits_used': used,
+        'credit_limit': DAILY_CREDIT_LIMIT,
+        'credits_remaining': max(0, DAILY_CREDIT_LIMIT - used),
     })
 
 @app.route('/scan-now')
@@ -327,6 +367,7 @@ def backtest():
         time.sleep(throttle)
         c15_all = fetch_candles(symbol, '15min', min(ltf_needed, 5000))
         time.sleep(throttle)
+        add_credits(2)
         if not c4_all or not c15_all:
             errors.append(symbol)
             continue
