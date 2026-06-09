@@ -1,6 +1,3 @@
-
-raw
-Dashboard · HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -312,6 +309,10 @@ Dashboard · HTML
     <div class="conn-badge connected" id="connBadge">
       <div class="conn-dot"></div>
       <span id="connText">LIVE</span>
+    </div>
+    <div id="creditMeter" title="Twelve Data API credits used today"
+         style="font-size:10px;letter-spacing:0.08em;padding:3px 8px;border:1px solid var(--border2);border-radius:3px;color:var(--text2);white-space:nowrap">
+      ⛁ --/-- credits
     </div>
     <div id="clock">--:--:-- UTC</div>
   </div>
@@ -802,6 +803,19 @@ async function pollStatus() {
     const r = await fetch(API + '/status');
     const s = await r.json();
     const log = s.log || {};
+ 
+    // ── credit meter (in scope of s) ──
+    const meter = document.getElementById('creditMeter');
+    if (meter && s.credits_used != null) {
+      const limit = s.credit_limit || 800;
+      const pctUsed = s.credits_used / limit;
+      let color = 'var(--text2)';
+      if (pctUsed >= 0.75) color = 'var(--warn)';
+      if (pctUsed >= 0.90) color = 'var(--bear)';
+      meter.style.color = color;
+      meter.style.borderColor = pctUsed >= 0.75 ? color : 'var(--border2)';
+      meter.textContent = `⛁ ${s.credits_used}/${limit} credits`;
+    }
  
     const wrap = document.getElementById('scanProgressWrap');
     const bar  = document.getElementById('scanProgressBar');
