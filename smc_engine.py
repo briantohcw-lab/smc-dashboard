@@ -1,4 +1,3 @@
-Smc engine · PY
 """
 smc_engine.py
 Smart Money Concepts detection — ported from LuxAlgo Pine Script logic.
