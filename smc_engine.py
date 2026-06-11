@@ -71,6 +71,7 @@ class SMCResult:
     sweep_level: float = None        # the level that was swept
     confluence: int = 0              # total score 1-5
     factors: list = None             # human-readable list of met factors
+    struct_aligned: bool = False     # is 15m structure aligned with the OB bias?
     # ── nearest-OB watchlist (when NOT currently in an OB) ──
     near_ob_bias: int = 0            # bias of nearest OB
     near_ob_high: float = None
@@ -78,6 +79,12 @@ class SMCResult:
     near_ob_type: str = None
     near_distance: float = None      # absolute price distance to nearest OB edge
     near_distance_pips: float = None # distance expressed in pips
+    # ── structural SL/TP REFERENCE (not advice; mechanical levels only) ──
+    sl_price: float = None           # stop beyond the far edge of the OB
+    tp_price: float = None           # take-profit at default R:R
+    rr: float = None                 # the R:R used for tp_price
+    sl_pips: float = None
+    tp_pips: float = None
 
 
 class SMCEngine:
@@ -89,11 +96,12 @@ class SMCEngine:
 
     def __init__(self, swing_length: int = 50, internal_length: int = 5,
                  atr_period: int = 200, ob_filter_mult: float = 2.0,
-                 swing_only: bool = True):
+                 swing_only: bool = True, default_rr: float = 2.0):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
         self.ob_filter_mult = ob_filter_mult
+        self.default_rr = default_rr   # R:R used for the reference TP level
         # swing_only: only use 4H SWING order blocks for signals & watchlist.
         # Internal OBs are noisy and produce zones not shown on the chart,
         # which caused phantom signals (e.g. NZDCAD, USDCHF). Default True.
@@ -524,6 +532,28 @@ class SMCEngine:
 
             result.confluence = score
             result.factors = factors
+            result.struct_aligned = struct_aligned
+
+            # ── Structural SL/TP REFERENCE (mechanical, not advice) ──
+            # SL: just beyond the OB's far edge with a small ATR-based buffer.
+            # TP: at a default risk:reward multiple from entry (current price).
+            pip = self._pip_size(pair)
+            buffer = max(tol * 0.15, pip * 2)   # small buffer beyond the zone
+            rr = self.default_rr
+            if ob_bull:
+                sl = hit_ob.low - buffer        # stop below the bullish OB
+                risk = price - sl
+                tp = price + risk * rr
+            else:
+                sl = hit_ob.high + buffer       # stop above the bearish OB
+                risk = sl - price
+                tp = price - risk * rr
+            if risk > 0:
+                result.sl_price = round(sl, 5)
+                result.tp_price = round(tp, 5)
+                result.rr = rr
+                result.sl_pips = round(abs(price - sl) / pip, 1) if pip else None
+                result.tp_pips = round(abs(tp - price) / pip, 1) if pip else None
 
         else:
             # ── Not in an OB: find the NEAREST live OB for the watchlist ──
