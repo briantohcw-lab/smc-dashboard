@@ -44,6 +44,15 @@ LTF_BARS      = int(os.environ.get('LTF_BARS', '120'))   # LTF candles to fetch
 HTF_TF = os.environ.get('HTF_TF', '4h').strip()
 LTF_TF = os.environ.get('LTF_TF', '15min').strip()
 
+# ── Candle timezone anchoring ──
+# This controls where intraday candle boundaries fall. It matters a LOT for 4H
+# order blocks: a 4H candle anchored to UTC midnight covers a different window
+# than one anchored to the New York close, so OB zones shift.
+# TradingView's FX feeds typically anchor to the NY session. Setting this to
+# 'America/New_York' makes Twelve Data's 4H boundaries line up closer to FXCM.
+# Options: 'UTC', 'America/New_York', or any IANA timezone name.
+CANDLE_TZ = os.environ.get('CANDLE_TZ', 'America/New_York').strip()
+
 engine = SMCEngine(swing_length=50, internal_length=5)
 
 # ── Shared state ──
@@ -114,7 +123,7 @@ def fetch_candles(symbol, interval, outputsize):
         'interval': interval,
         'outputsize': outputsize,
         'apikey': API_KEY,
-        'timezone': 'UTC',
+        'timezone': CANDLE_TZ,
         'order': 'ASC',
     })
     url = f'https://api.twelvedata.com/time_series?{params}'
@@ -358,6 +367,7 @@ def status():
         'credits_remaining': max(0, DAILY_CREDIT_LIMIT - used),
         'htf': HTF_TF,
         'ltf': LTF_TF,
+        'candle_tz': CANDLE_TZ,
     })
 
 @app.route('/scan-now')
