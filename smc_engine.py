@@ -301,29 +301,45 @@ class SMCEngine:
     # ── Fair Value Gap detection (LuxAlgo 3-candle method) ──
     def _detect_fvg(self, candles, bias, near_price, tolerance):
         """
-        A bullish FVG = gap where candle[i-2].high < candle[i].low (price jumped up
-        leaving an unfilled gap). Bearish FVG = candle[i-2].low > candle[i].high.
-        We look for an unfilled FVG in the OB direction near the current price.
-        Returns True if a supporting FVG exists near the zone.
+        A bullish FVG = gap where candle[i-2].high < candle[i].low (price jumped
+        up leaving an unfilled 3-candle gap). Bearish = candle[i-2].low > candle[i].high.
+
+        Tightened rules (the old version fired on any tiny gap anywhere near price):
+          1. The gap must be MEANINGFUL in size (>= 25% of ATR), not micro-noise.
+          2. It must be RECENT (in the last ~20 bars), since a setup's FVG is the
+             one that just formed, not an ancient one.
+          3. The gap must sit close to the current price (within ~1.5 ATR), i.e.
+             it's the gap price is actually reacting to.
         """
         n = len(candles)
-        for i in range(n - 1, 1, -1):
-            c0 = candles[i]       # current
-            c2 = candles[i-2]     # two bars back
+        if n < 3 or tolerance <= 0:
+            return False
+        min_gap = tolerance * 0.25          # gap must be at least 1/4 ATR
+        near_window = tolerance * 1.5        # and near current price
+        lookback = max(3, n - 20)            # only the last ~20 bars
+
+        for i in range(n - 1, lookback - 1, -1):
+            if i < 2:
+                break
+            c0 = candles[i]
+            c2 = candles[i-2]
             if bias == BULLISH:
-                # bullish gap: top of gap = c0.low, bottom = c2.high
                 if c0.low > c2.high:
-                    gap_top, gap_bot = c0.low, c2.high
-                    # unfilled = price hasn't traded back below gap bottom since
+                    gap_size = c0.low - c2.high
+                    gap_bot = c2.high
+                    if gap_size < min_gap:
+                        continue
                     filled = any(candles[j].low < gap_bot for j in range(i+1, n))
-                    if not filled and abs(near_price - gap_bot) < tolerance * 3:
+                    if not filled and abs(near_price - gap_bot) < near_window:
                         return True
             else:
-                # bearish gap: top = c2.low, bottom = c0.high
                 if c2.low > c0.high:
-                    gap_top, gap_bot = c2.low, c0.high
+                    gap_size = c2.low - c0.high
+                    gap_top = c2.low
+                    if gap_size < min_gap:
+                        continue
                     filled = any(candles[j].high > gap_top for j in range(i+1, n))
-                    if not filled and abs(near_price - gap_top) < tolerance * 3:
+                    if not filled and abs(near_price - gap_top) < near_window:
                         return True
         return False
 
@@ -331,25 +347,37 @@ class SMCEngine:
     def _detect_eqhl(self, candles, bias, near_price, tolerance):
         """
         Equal highs (resting liquidity above) or equal lows (below).
-        For a bullish setup we look for equal LOWS near/below price (buy-side
-        liquidity that was or will be swept). For bearish, equal HIGHS.
-        Two swing points within `tolerance` of each other count as equal.
+        For bullish we look for equal LOWS near price; for bearish, equal HIGHS.
+
+        Tightened (the old version compared EVERY candle to every other and
+        almost always returned True). Now:
+          1. Only compare confirmed SWING pivots (fractal highs/lows), not every
+             bar — equal highs means two actual swing highs at the same level.
+          2. The two levels must be genuinely equal (within 0.15 ATR).
+          3. The equal level must be near current price (within 1.5 ATR) — it's
+             the liquidity price is approaching, not something far away.
+          4. The two pivots must be a few bars apart (a real double-top/bottom,
+             not two adjacent bars).
         """
-        recent = candles[-60:] if len(candles) > 60 else candles
-        if bias == BULLISH:
-            lows = [c.low for c in recent]
-            for i in range(len(lows)):
-                for j in range(i+1, len(lows)):
-                    if abs(lows[i] - lows[j]) < tolerance * 0.5:
-                        if abs(near_price - lows[i]) < tolerance * 4:
-                            return True
-        else:
-            highs = [c.high for c in recent]
-            for i in range(len(highs)):
-                for j in range(i+1, len(highs)):
-                    if abs(highs[i] - highs[j]) < tolerance * 0.5:
-                        if abs(near_price - highs[i]) < tolerance * 4:
-                            return True
+        if tolerance <= 0:
+            return False
+        highs, lows = self._swing_levels(candles, left=2, right=2)
+        # Equal highs/lows are DEFINED by the two levels being nearly identical.
+        # Keep this very tight so it means a real double-top/bottom, not just two
+        # swings that happen to be in the same area. Equal FX really is common,
+        # so this is intentionally a hard test.
+        eq_tol = tolerance * 0.05             # within 5% ATR = genuinely "equal"
+        near_window = tolerance * 0.8
+
+        pts = lows if bias == BULLISH else highs
+        for a in range(len(pts)):
+            for b in range(a + 1, len(pts)):
+                idx_a, lvl_a = pts[a]
+                idx_b, lvl_b = pts[b]
+                if abs(idx_a - idx_b) < 3:
+                    continue                      # too close together
+                if abs(lvl_a - lvl_b) < eq_tol and abs(near_price - lvl_a) < near_window:
+                    return True
         return False
 
     # ── Liquidity sweep (stop hunt) ──
