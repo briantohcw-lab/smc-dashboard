@@ -867,7 +867,17 @@ async function pollStatus() {
       if (pctUsed >= 0.90) color = 'var(--bear)';
       meter.style.color = color;
       meter.style.borderColor = pctUsed >= 0.75 ? color : 'var(--border2)';
-      meter.textContent = `⛁ ${s.credits_used}/${limit} credits`;
+      // show dropped pairs (e.g. gold failing to fetch) so issues are visible
+      const dropped = (s.log && s.log.dropped_pairs) ? s.log.dropped_pairs : [];
+      if (dropped.length) {
+        meter.style.color = 'var(--bear)';
+        meter.style.borderColor = 'var(--bear)';
+        meter.textContent = `⚠ dropped: ${dropped.join(', ')}  |  ⛁ ${s.credits_used}/${limit}`;
+        meter.title = 'These pairs failed to fetch this scan (no data). Confirm them on your own chart.';
+      } else {
+        meter.textContent = `⛁ ${s.credits_used}/${limit} credits`;
+        meter.title = 'Twelve Data API credits used today';
+      }
     }
 
     // ── reflect active timeframes in the subtitle ──
