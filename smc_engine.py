@@ -1,28 +1,28 @@
 """
 smc_engine.py
 Smart Money Concepts detection — ported from LuxAlgo Pine Script logic.
- 
+
 Detects:
   - Swing pivot highs/lows (leg-based, same method as LuxAlgo)
   - Internal pivots (shorter lookback)
   - Market structure: BOS (Break of Structure) & CHoCH (Change of Character)
   - Order Blocks (the candle that caused the structure break)
   - Whether current price is INSIDE an order block
- 
+
 This runs on OHLC candle data fetched from any price API.
 It is a faithful-as-practical port; minor differences vs TradingView
 can occur due to floating point and bar indexing, but the structural
 logic (pivots, BOS/CHoCH, OB selection) mirrors the original.
 """
- 
+
 from dataclasses import dataclass, field
 from typing import Optional
- 
- 
+
+
 BULLISH = 1
 BEARISH = -1
- 
- 
+
+
 @dataclass
 class Candle:
     time: int
@@ -30,8 +30,8 @@ class Candle:
     high: float
     low: float
     close: float
- 
- 
+
+
 @dataclass
 class Pivot:
     level: float = None
@@ -39,8 +39,8 @@ class Pivot:
     crossed: bool = False
     bar_index: int = 0
     bar_time: int = 0
- 
- 
+
+
 @dataclass
 class OrderBlock:
     high: float
@@ -48,8 +48,8 @@ class OrderBlock:
     time: int
     bias: int          # BULLISH or BEARISH
     bar_index: int
- 
- 
+
+
 @dataclass
 class SMCResult:
     pair: str
@@ -85,18 +85,19 @@ class SMCResult:
     rr: float = None                 # the R:R used for tp_price
     sl_pips: float = None
     tp_pips: float = None
- 
- 
+
+
 class SMCEngine:
     """
     Feed it a list of candles (oldest first) and it computes SMC structure.
     Mirrors LuxAlgo: a 'leg' flips bullish/bearish when price makes a new
     highest-high / lowest-low over `swing_length` bars. The flip marks a pivot.
     """
- 
+
     def __init__(self, swing_length: int = 50, internal_length: int = 5,
                  atr_period: int = 200, ob_filter_mult: float = 2.0,
-                 swing_only: bool = True, default_rr: float = 2.0):
+                 swing_only: bool = True, default_rr: float = 2.0,
+                 swing_max_age: int = 500, internal_max_age: int = 120):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
@@ -106,7 +107,15 @@ class SMCEngine:
         # Internal OBs are noisy and produce zones not shown on the chart,
         # which caused phantom signals (e.g. NZDCAD, USDCHF). Default True.
         self.swing_only = swing_only
- 
+        # Age limits: how many bars an OB can survive before being treated as
+        # stale. Set HIGH because real 4H order blocks stay valid for weeks and
+        # price often retests them only after a long excursion (e.g. XAUUSD
+        # dropping then rallying back into a zone built weeks earlier). The old
+        # 60-bar limit deleted these valid retest zones before price returned.
+        # Close-based mitigation still removes zones price has truly invalidated.
+        self.swing_max_age = swing_max_age
+        self.internal_max_age = internal_max_age
+
     # ── ATR (for OB volatility filter & structure noise) ──
     def _atr(self, candles, period):
         if len(candles) < 2:
@@ -123,7 +132,7 @@ class SMCEngine:
             window = trs[start:i+1]
             atr.append(sum(window) / len(window))
         return atr
- 
+
     # ── Leg detection (the heart of LuxAlgo pivot logic) ──
     def _legs(self, candles, size):
         """
@@ -159,7 +168,7 @@ class SMCEngine:
                 leg = 1   # BULLISH_LEG (a low was confirmed -> bottom pivot)
             legs.append(leg)
         return legs
- 
+
     def _process_structure(self, candles, size, internal=False):
         """
         Walk candles, find pivots from leg changes, detect BOS/CHoCH when
@@ -169,12 +178,12 @@ class SMCEngine:
         """
         n = len(candles)
         legs = self._legs(candles, size)
- 
+
         piv_high = Pivot()
         piv_low = Pivot()
         trend = 0
         order_blocks = []
- 
+
         for i in range(1, n):
             # detect leg change = new pivot
             if legs[i] != legs[i-1]:
@@ -196,9 +205,9 @@ class SMCEngine:
                         piv_high.crossed = False
                         piv_high.bar_index = idx
                         piv_high.bar_time = candles[idx].time
- 
+
             c = candles[i]
- 
+
             # ── Bullish structure: close crosses above last pivot high ──
             if piv_high.level is not None and not piv_high.crossed:
                 if c.close > piv_high.level:
@@ -209,7 +218,7 @@ class SMCEngine:
                     if ob:
                         order_blocks.insert(0, ob)
                     piv_high.last_structure = tag
- 
+
             # ── Bearish structure: close crosses below last pivot low ──
             if piv_low.level is not None and not piv_low.crossed:
                 if c.close < piv_low.level:
@@ -220,9 +229,9 @@ class SMCEngine:
                     if ob:
                         order_blocks.insert(0, ob)
                     piv_low.last_structure = tag
- 
+
         return piv_high, piv_low, trend, order_blocks
- 
+
     def _find_ob(self, candles, from_idx, to_idx, bias):
         """
         LuxAlgo: the order block is the extreme candle in the leg before the break.
@@ -235,12 +244,12 @@ class SMCEngine:
         segment = candles[from_idx:to_idx]
         if not segment:
             return None
- 
+
         if bias == BULLISH:
             ob_candle = min(segment, key=lambda c: c.low)
         else:
             ob_candle = max(segment, key=lambda c: c.high)
- 
+
         return OrderBlock(
             high=ob_candle.high,
             low=ob_candle.low,
@@ -248,7 +257,7 @@ class SMCEngine:
             bias=bias,
             bar_index=candles.index(ob_candle)
         )
- 
+
     def _prune_mitigated(self, candles, order_blocks, max_age=None):
         """
         Remove order blocks that are no longer valid. An OB is dropped if:
@@ -272,23 +281,23 @@ class SMCEngine:
         for ob in order_blocks:
             after = candles[ob.bar_index+1:]
             mitigated = False
- 
+
             # 1. close-based mitigation
             for c in after:
                 if ob.bias == BEARISH and c.close > ob.high:
                     mitigated = True; break
                 if ob.bias == BULLISH and c.close < ob.low:
                     mitigated = True; break
- 
+
             # 3. age limit
             if not mitigated and max_age is not None:
                 if (n - 1 - ob.bar_index) > max_age:
                     mitigated = True
- 
+
             if not mitigated:
                 live.append(ob)
         return live
- 
+
     # ── Fair Value Gap detection (LuxAlgo 3-candle method) ──
     def _detect_fvg(self, candles, bias, near_price, tolerance):
         """
@@ -317,7 +326,7 @@ class SMCEngine:
                     if not filled and abs(near_price - gap_top) < tolerance * 3:
                         return True
         return False
- 
+
     # ── Equal Highs / Equal Lows (liquidity pools) ──
     def _detect_eqhl(self, candles, bias, near_price, tolerance):
         """
@@ -342,7 +351,7 @@ class SMCEngine:
                         if abs(near_price - highs[i]) < tolerance * 4:
                             return True
         return False
- 
+
     # ── Liquidity sweep (stop hunt) ──
     def _swing_levels(self, candles, left=2, right=2):
         """
@@ -371,12 +380,12 @@ class SMCEngine:
             if is_low:
                 lows.append((i, l))
         return highs, lows
- 
+
     def _detect_sweep(self, candles, bias, tolerance, zone_ref=None):
         """
         A liquidity sweep = price pierces a CONFIRMED SWING level (where stops
         rest) then closes back inside — a stop hunt before the real move.
- 
+
         Tightened rules (vs the old loose version):
           1. The swept level must be an actual swing pivot (fractal), not just
              any prior bar's extreme.
@@ -384,7 +393,7 @@ class SMCEngine:
           3. If zone_ref (the OB level near price) is given, the swept level
              must be reasonably near that zone — so we only count sweeps of the
              RELEVANT liquidity, not random noise elsewhere on the chart.
- 
+
         For BULLISH: a swing LOW is pierced (wick below) then close back above.
         For BEARISH: a swing HIGH is pierced (wick above) then close back below.
         Returns (swept: bool, level: float|None).
@@ -392,17 +401,17 @@ class SMCEngine:
         n = len(candles)
         if n < 12:
             return False, None
- 
+
         recent_start = n - 5          # only the last 5 bars can be the sweep bar
         near_tol = tolerance * 5 if tolerance else None
- 
+
         # Find swing pivots ONLY in the prior window (exclude the recent bars,
         # so the sweep bar itself can't be mistaken for the level it sweeps).
         prior = candles[:recent_start]
         if len(prior) < 6:
             return False, None
         highs, lows = self._swing_levels(prior, left=2, right=2)
- 
+
         if bias == BULLISH:
             cand = [lv for (idx, lv) in lows]
             if not cand:
@@ -423,7 +432,7 @@ class SMCEngine:
                         if zone_ref is None or abs(hv - zone_ref) < near_tol:
                             return True, hv
         return False, None
- 
+
     def analyze(self, pair, candles_4h, candles_15m) -> Optional[SMCResult]:
         """
         Main entry point.
@@ -436,19 +445,19 @@ class SMCEngine:
             return None
         if len(candles_15m) < self.internal_length + 5:
             return None
- 
+
         price = candles_15m[-1].close
- 
+
         # ── HTF (4H) swing structure + order blocks ──
         sh4, sl4, trend4, obs4_swing = self._process_structure(
             candles_4h, self.swing_length, internal=False)
-        obs4_swing = self._prune_mitigated(candles_4h, obs4_swing, max_age=60)
- 
+        obs4_swing = self._prune_mitigated(candles_4h, obs4_swing, max_age=self.swing_max_age)
+
         # also compute 4H internal OBs (shorter lookback) for more zones
         sh4i, sl4i, trend4i, obs4_int = self._process_structure(
             candles_4h, self.internal_length, internal=True)
-        obs4_int = self._prune_mitigated(candles_4h, obs4_int, max_age=40)
- 
+        obs4_int = self._prune_mitigated(candles_4h, obs4_int, max_age=self.internal_max_age)
+
         # ── LTF (15M) internal structure for confirmation ──
         sh15, sl15, trend15, _ = self._process_structure(
             candles_15m, self.internal_length, internal=True)
@@ -461,18 +470,18 @@ class SMCEngine:
         elif getattr(sl15, 'last_structure', None) and trend15 == BEARISH:
             last_struct_15 = sl15.last_structure
             last_struct_bias_15 = BEARISH
- 
+
         # ── Check if price is inside a live 4H OB ──
         def price_in_ob(obs, ob_type):
             for ob in obs:
                 if ob.low <= price <= ob.high:
                     return ob, ob_type
             return None, None
- 
+
         hit_ob, hit_type = price_in_ob(obs4_swing, 'Swing')
         if hit_ob is None and not self.swing_only:
             hit_ob, hit_type = price_in_ob(obs4_int, 'Internal')
- 
+
         result = SMCResult(
             pair=pair,
             price=price,
@@ -480,7 +489,7 @@ class SMCEngine:
             swing_trend=trend4,
             internal_trend=trend15,
         )
- 
+
         if hit_ob is not None:
             result.in_ob = True
             result.ob_bias = hit_ob.bias
@@ -489,13 +498,13 @@ class SMCEngine:
             result.ob_type = hit_type
             result.last_structure = last_struct_15
             result.last_structure_bias = last_struct_bias_15
- 
+
             # tolerance based on ATR of the 4H series (zone width proxy)
             atr4 = self._atr(candles_4h, 14)
             tol = atr4[-1] if atr4 else (hit_ob.high - hit_ob.low)
- 
+
             ob_bull = (hit_ob.bias == BULLISH)
- 
+
             # Factor 2: 15m structure aligned
             struct_aligned = bool(
                 last_struct_15 and (
@@ -503,13 +512,13 @@ class SMCEngine:
                     (not ob_bull and last_struct_bias_15 == BEARISH)
                 )
             )
- 
+
             # Factor 3: FVG supporting the OB direction (check on 15m, near price)
             result.fvg = self._detect_fvg(candles_15m, hit_ob.bias, price, tol)
- 
+
             # Factor 4: Equal highs/lows liquidity near the zone (on 4H)
             result.eqhl = self._detect_eqhl(candles_4h, hit_ob.bias, price, tol)
- 
+
             # Factor 5: Liquidity sweep / stop hunt (on 15m for entry timing).
             # Pass the OB edge as zone_ref so only sweeps of liquidity NEAR the
             # zone count — not random wicks elsewhere on the chart.
@@ -517,7 +526,7 @@ class SMCEngine:
             swept, swept_level = self._detect_sweep(candles_15m, hit_ob.bias, tol, zone_ref)
             result.liquidity_sweep = swept
             result.sweep_level = swept_level
- 
+
             # ── Total confluence score (max 5) ──
             factors = ['4H OB']
             score = 1
@@ -529,11 +538,11 @@ class SMCEngine:
                 score += 1; factors.append('EQH/EQL')
             if result.liquidity_sweep:
                 score += 1; factors.append('Liquidity Sweep')
- 
+
             result.confluence = score
             result.factors = factors
             result.struct_aligned = struct_aligned
- 
+
             # ── Structural SL/TP REFERENCE (mechanical, not advice) ──
             # SL: just beyond the OB's far edge with a small ATR-based buffer.
             # TP: at a default risk:reward multiple from entry (current price).
@@ -554,7 +563,7 @@ class SMCEngine:
                 result.rr = rr
                 result.sl_pips = round(abs(price - sl) / pip, 1) if pip else None
                 result.tp_pips = round(abs(tp - price) / pip, 1) if pip else None
- 
+
         else:
             # ── Not in an OB: find the NEAREST live OB for the watchlist ──
             all_obs = [(ob, 'Swing') for ob in obs4_swing]
@@ -573,7 +582,7 @@ class SMCEngine:
                 if best_dist is None or d < best_dist:
                     best_dist = d
                     best = (ob, ob_type)
- 
+
             if best is not None:
                 ob, ob_type = best
                 pip = self._pip_size(pair)
@@ -583,9 +592,9 @@ class SMCEngine:
                 result.near_ob_type = ob_type
                 result.near_distance = best_dist
                 result.near_distance_pips = round(best_dist / pip, 1) if pip else None
- 
+
         return result
- 
+
     @staticmethod
     def _pip_size(pair):
         p = pair.replace('/', '').upper()
