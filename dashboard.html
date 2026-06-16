@@ -544,12 +544,25 @@ function renderArmed(a) {
     const arrow = x.bias==='bull' ? '▲' : '▼';
     const zone = (x.obLow!=null && x.obHigh!=null)
       ? `${fmt(x.pair,x.obLow)}–${fmt(x.pair,x.obHigh)}` : '';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px">
-      <span style="font-weight:600;color:#fff;min-width:64px">${x.pair}</span>
+    // session tag — NY highlighted (user trades NY hours), others dimmed
+    const sess = x.session || '';
+    let sessColor = 'var(--text3,#5a6877)';
+    if (sess === 'NY') sessColor = 'var(--bull)';
+    else if (sess === 'London') sessColor = 'var(--accent)';
+    const sessTag = sess ? `<span style="color:${sessColor};font-size:8px;letter-spacing:0.1em;border:1px solid ${sessColor};border-radius:2px;padding:1px 4px">${sess}</span>` : '';
+    // mitigation status: currently in zone vs tapped-and-wicked-out
+    const mitInfo = x.currentlyIn
+      ? '<span style="color:var(--text3,#5a6877);font-size:8px">IN ZONE</span>'
+      : (x.barsSinceMit!=null
+          ? `<span style="color:var(--warn);font-size:8px">TAPPED ${x.barsSinceMit}b ago</span>`
+          : '');
+    return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap">
+      <span style="font-weight:600;color:#fff;min-width:60px">${x.pair}</span>
       <span style="color:${dirColor};font-size:9px;letter-spacing:0.1em">${arrow} ${x.bias==='bull'?'LONG':'SHORT'}</span>
-      <span style="color:var(--text2);font-size:10px">${x.obType}</span>
-      <span style="color:var(--text3,#5a6877);font-size:9px">in ${zone}</span>
-      <span style="margin-left:auto;color:var(--warn);font-size:9px;letter-spacing:0.05em">⏳ awaiting ${x.m15needed||'15m confirm'}</span>
+      ${sessTag}
+      ${mitInfo}
+      <span style="color:var(--text3,#5a6877);font-size:9px">${zone}</span>
+      <span style="margin-left:auto;color:var(--warn);font-size:9px;letter-spacing:0.05em">⏳ ${x.m15needed||'15m confirm'}</span>
     </div>`;
   }).join('');
   el.innerHTML = rows;
