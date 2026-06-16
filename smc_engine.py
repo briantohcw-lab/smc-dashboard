@@ -77,6 +77,10 @@ class SMCResult:
     bars_since_mit: int = None       # 15m bars since the first tap
     session: str = None              # session the mitigation happened in (NY/London/Asian)
     currently_in_ob: bool = False    # is price literally inside the OB right now
+    # ── break-and-retest of 15m OB (the entry trigger) ──
+    br_state: str = None             # 'broken' (awaiting retest) | 'retest' (signal)
+    ltf_ob_high: float = None        # the 15m OB zone left by the structure break
+    ltf_ob_low: float = None
     # ── nearest-OB watchlist (when NOT currently in an OB) ──
     near_ob_bias: int = 0            # bias of nearest OB
     near_ob_high: float = None
@@ -663,6 +667,19 @@ class SMCEngine:
             result.factors = factors
             result.struct_aligned = struct_aligned
 
+            # ── Break-and-retest of 15m OB = the actual entry trigger ──
+            # ARMED (in 4H OB) progresses to a SIGNAL only when the 15m has:
+            #   1. broken structure in the OB direction (bearish CHoCH for shorts)
+            #   2. left a 15m OB, and price has RETESTED it (re-entered the zone).
+            # Until the retest, it's "broken — awaiting retest" (still ARMED).
+            br = self._break_and_retest(candles_15m, hit_ob.bias, tol)
+            result.br_state = br['state'] if br['state'] != 'none' else None
+            if br['state'] in ('broken', 'retest'):
+                result.ltf_ob_high = round(br['ob_high'], 5)
+                result.ltf_ob_low = round(br['ob_low'], 5)
+            # promote to full signal ONLY on retest of the 15m OB
+            result.struct_aligned = (br['state'] == 'retest')
+
             # ── Structural SL/TP REFERENCE (mechanical, not advice) ──
             # SL: just beyond the OB's far edge with a small ATR-based buffer.
             # TP: at a default risk:reward multiple from entry (current price).
@@ -714,6 +731,85 @@ class SMCEngine:
                 result.near_distance_pips = round(best_dist / pip, 1) if pip else None
 
         return result
+
+    def _break_and_retest(self, candles_15m, bias, tolerance):
+        """
+        Break-and-retest entry detection on the 15m timeframe.
+
+        Sequence (for a BEARISH setup; mirror for bullish):
+          1. BREAK: 15m breaks structure DOWN — price closes below a recent swing
+             low (a bearish CHoCH/BOS). This is the structural shift.
+          2. OB FORMED: the break leaves a 15m sell order block = the last
+             up-move (bullish candle/cluster) immediately before the break-down
+             candle. Its zone is roughly [that candle's open .. its high].
+          3. RETEST: price then retraces UP and re-enters that 15m OB zone.
+             Re-entering the zone = the entry trigger (Option A).
+
+        Returns a dict describing the state:
+          {'state': 'none' | 'broken' | 'retest',
+           'ob_high': float, 'ob_low': float,
+           'break_idx': int}
+          - 'broken'  = structure broke and a 15m OB formed, awaiting retest
+          - 'retest'  = price is back in the 15m OB now = SIGNAL trigger
+          - 'none'    = no qualifying break yet
+        """
+        n = len(candles_15m)
+        if n < 12 or tolerance <= 0:
+            return {'state': 'none'}
+
+        # Look at recent action only (the break should be recent, within the
+        # mitigation window era — not ancient history).
+        look = min(n, self.mitigation_window + 10)
+        seg = candles_15m[n - look:]
+        base = n - look
+
+        highs, lows = self._swing_levels(seg, left=2, right=2)
+
+        if bias == BEARISH:
+            # find a swing low that price later CLOSED below = bearish break
+            for (pivot_i, pivot_lvl) in lows:
+                # scan candles after the pivot for a close below it (the break)
+                for j in range(pivot_i + 1, len(seg)):
+                    if seg[j].close < pivot_lvl:
+                        break_idx = j
+                        # 15m sell OB = last bullish (up) candle before break_idx
+                        ob_i = None
+                        for k in range(break_idx - 1, max(0, break_idx - 6), -1):
+                            if seg[k].close > seg[k].open:   # bullish candle
+                                ob_i = k
+                                break
+                        if ob_i is None:
+                            ob_i = break_idx - 1
+                        ob_high = max(seg[ob_i].high, seg[ob_i].open)
+                        ob_low = min(seg[ob_i].close, seg[ob_i].low)
+                        # is price NOW back inside this OB (the retest)?
+                        last = seg[-1]
+                        in_zone = last.high >= ob_low and last.low <= ob_high
+                        state = 'retest' if in_zone else 'broken'
+                        return {'state': state, 'ob_high': ob_high,
+                                'ob_low': ob_low, 'break_idx': base + break_idx}
+        else:
+            # bullish: find a swing high price CLOSED above = bullish break
+            for (pivot_i, pivot_lvl) in highs:
+                for j in range(pivot_i + 1, len(seg)):
+                    if seg[j].close > pivot_lvl:
+                        break_idx = j
+                        # 15m buy OB = last bearish (down) candle before break
+                        ob_i = None
+                        for k in range(break_idx - 1, max(0, break_idx - 6), -1):
+                            if seg[k].close < seg[k].open:   # bearish candle
+                                ob_i = k
+                                break
+                        if ob_i is None:
+                            ob_i = break_idx - 1
+                        ob_high = max(seg[ob_i].open, seg[ob_i].high)
+                        ob_low = min(seg[ob_i].low, seg[ob_i].close)
+                        last = seg[-1]
+                        in_zone = last.high >= ob_low and last.low <= ob_high
+                        state = 'retest' if in_zone else 'broken'
+                        return {'state': state, 'ob_high': ob_high,
+                                'ob_low': ob_low, 'break_idx': base + break_idx}
+        return {'state': 'none'}
 
     def _recent_mitigation(self, ob, candles_15m, window_bars=20):
         """
