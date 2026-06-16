@@ -270,6 +270,9 @@ def scan_once():
             'mitigated':  res.mitigated,
             'currentlyIn': res.currently_in_ob,
             'barsSinceMit': res.bars_since_mit,
+            'brState':    res.br_state,
+            'ltfObHigh':  res.ltf_ob_high,
+            'ltfObLow':   res.ltf_ob_low,
             'receivedAt': datetime.now(timezone.utc).isoformat(),
         }
 
