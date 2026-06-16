@@ -72,6 +72,11 @@ class SMCResult:
     confluence: int = 0              # total score 1-5
     factors: list = None             # human-readable list of met factors
     struct_aligned: bool = False     # is 15m structure aligned with the OB bias?
+    # ── mitigation-event tracking (price tapped the OB, may have wicked out) ──
+    mitigated: bool = False          # OB was tapped within the watch window
+    bars_since_mit: int = None       # 15m bars since the first tap
+    session: str = None              # session the mitigation happened in (NY/London/Asian)
+    currently_in_ob: bool = False    # is price literally inside the OB right now
     # ── nearest-OB watchlist (when NOT currently in an OB) ──
     near_ob_bias: int = 0            # bias of nearest OB
     near_ob_high: float = None
@@ -97,7 +102,8 @@ class SMCEngine:
     def __init__(self, swing_length: int = 50, internal_length: int = 5,
                  atr_period: int = 200, ob_filter_mult: float = 2.0,
                  swing_only: bool = True, default_rr: float = 2.0,
-                 swing_max_age: int = 500, internal_max_age: int = 120):
+                 swing_max_age: int = 500, internal_max_age: int = 120,
+                 mitigation_window: int = 20):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
@@ -115,6 +121,10 @@ class SMCEngine:
         # Close-based mitigation still removes zones price has truly invalidated.
         self.swing_max_age = swing_max_age
         self.internal_max_age = internal_max_age
+        # mitigation_window: how many 15m bars after price taps a 4H OB the setup
+        # stays "armed" (watching for 15m CHoCH), even if price wicked back out.
+        # 20 bars = ~5 hours, covering a NY session for periodic checking.
+        self.mitigation_window = mitigation_window
 
     # ── ATR (for OB volatility filter & structure noise) ──
     def _atr(self, candles, period):
@@ -409,56 +419,108 @@ class SMCEngine:
                 lows.append((i, l))
         return highs, lows
 
+    def _liquidity_levels(self, candles, lookback=80, cluster_tol=None):
+        """
+        Identify Buyside / Sellside liquidity levels (FluxCharts-style).
+          - BUYSIDE liquidity  = swing HIGHS  (buy-stops rest above)
+          - SELLSIDE liquidity = swing LOWS   (sell-stops rest below)
+        Levels where multiple swing points cluster are stronger liquidity pools.
+        Returns (buyside_levels, sellside_levels) as lists of prices, most
+        recent first, restricted to the last `lookback` bars.
+        """
+        n = len(candles)
+        window = candles[max(0, n - lookback):]
+        highs, lows = self._swing_levels(window, left=2, right=2)
+        buyside = [lv for (_, lv) in highs]
+        sellside = [lv for (_, lv) in lows]
+
+        # Optionally cluster near-equal levels into single pools (stronger
+        # liquidity). cluster_tol defaults to a small fraction of ATR.
+        def cluster(levels):
+            if not levels or not cluster_tol:
+                return sorted(set(levels), reverse=True)
+            levels = sorted(levels)
+            out, group = [], [levels[0]]
+            for lv in levels[1:]:
+                if abs(lv - group[-1]) <= cluster_tol:
+                    group.append(lv)
+                else:
+                    out.append(sum(group) / len(group))
+                    group = [lv]
+            out.append(sum(group) / len(group))
+            return sorted(out, reverse=True)
+
+        return cluster(buyside), cluster(sellside)
+
     def _detect_sweep(self, candles, bias, tolerance, zone_ref=None):
         """
-        A liquidity sweep = price pierces a CONFIRMED SWING level (where stops
-        rest) then closes back inside — a stop hunt before the real move.
+        Liquidity sweep via LONG-WICK REJECTION (FluxCharts Buyside/Sellside
+        Liquidity concept ported to the engine).
 
-        Tightened rules (vs the old loose version):
-          1. The swept level must be an actual swing pivot (fractal), not just
-             any prior bar's extreme.
-          2. The sweep must have happened in the last few bars.
-          3. If zone_ref (the OB level near price) is given, the swept level
-             must be reasonably near that zone — so we only count sweeps of the
-             RELEVANT liquidity, not random noise elsewhere on the chart.
+        A genuine sweep is NOT just price poking through a level — it's a candle
+        that spikes through a liquidity pool to grab stops, then gets REJECTED,
+        closing its body back on the original side. The tell is a LONG WICK:
+          - BEARISH setup: a 15m candle's HIGH pierces a BUYSIDE liquidity level
+            (a swing high), but it CLOSES back below that level, leaving a long
+            upper wick. Stops above were grabbed, then price rejected down.
+          - BULLISH setup: a candle's LOW pierces a SELLSIDE liquidity level
+            (swing low) and CLOSES back above it, leaving a long lower wick.
 
-        For BULLISH: a swing LOW is pierced (wick below) then close back above.
-        For BEARISH: a swing HIGH is pierced (wick above) then close back below.
+        Strict criteria (fixes the old over-firing sweep):
+          1. The swept level is a real swing-pivot liquidity level.
+          2. The wick must actually pierce the level and the body close back.
+          3. The rejection WICK must be >= `min_wick_frac` of the candle's full
+             range (a real long wick, not a marginal poke). Default 50%.
+          4. The wick beyond the level must be meaningful (>= 0.2 ATR), so a
+             1-pip overshoot doesn't count.
+          5. Happened in the last few bars, and (if zone_ref given) near the zone.
+
         Returns (swept: bool, level: float|None).
         """
         n = len(candles)
-        if n < 12:
+        if n < 12 or tolerance <= 0:
             return False, None
 
-        recent_start = n - 5          # only the last 5 bars can be the sweep bar
-        near_tol = tolerance * 5 if tolerance else None
+        recent_start = n - 5            # only the last 5 bars can be the sweep bar
+        near_tol = tolerance * 5
+        min_wick_frac = 0.5             # rejection wick >= 50% of candle range
+        min_pierce = tolerance * 0.2    # wick must clear the level by >= 0.2 ATR
 
-        # Find swing pivots ONLY in the prior window (exclude the recent bars,
-        # so the sweep bar itself can't be mistaken for the level it sweeps).
+        # Liquidity levels from the PRIOR window (exclude recent bars so the
+        # sweep candle isn't mistaken for the level it sweeps).
         prior = candles[:recent_start]
         if len(prior) < 6:
             return False, None
-        highs, lows = self._swing_levels(prior, left=2, right=2)
+        buyside, sellside = self._liquidity_levels(prior, lookback=80,
+                                                   cluster_tol=tolerance * 0.3)
 
-        if bias == BULLISH:
-            cand = [lv for (idx, lv) in lows]
-            if not cand:
-                return False, None
-            for c in candles[recent_start:]:
-                for lv in cand:
-                    # wick pierces below the swing low, close reclaims above it
-                    if c.low < lv and c.close > lv:
-                        if zone_ref is None or abs(lv - zone_ref) < near_tol:
-                            return True, lv
-        else:
-            cand = [hv for (idx, hv) in highs]
-            if not cand:
-                return False, None
-            for c in candles[recent_start:]:
-                for hv in cand:
-                    if c.high > hv and c.close < hv:
-                        if zone_ref is None or abs(hv - zone_ref) < near_tol:
-                            return True, hv
+        for c in candles[recent_start:]:
+            rng = c.high - c.low
+            if rng <= 0:
+                continue
+            body_hi = max(c.open, c.close)
+            body_lo = min(c.open, c.close)
+
+            if bias == BEARISH:
+                # sweep of BUYSIDE liquidity (swing highs): long UPPER wick
+                upper_wick = c.high - body_hi
+                for lv in buyside:
+                    pierced = c.high > lv + min_pierce      # wick clears level
+                    closed_back = c.close < lv               # body rejects below
+                    long_wick = upper_wick >= rng * min_wick_frac
+                    near = (zone_ref is None) or abs(lv - zone_ref) < near_tol
+                    if pierced and closed_back and long_wick and near:
+                        return True, lv
+            else:
+                # sweep of SELLSIDE liquidity (swing lows): long LOWER wick
+                lower_wick = body_lo - c.low
+                for lv in sellside:
+                    pierced = c.low < lv - min_pierce
+                    closed_back = c.close > lv
+                    long_wick = lower_wick >= rng * min_wick_frac
+                    near = (zone_ref is None) or abs(lv - zone_ref) < near_tol
+                    if pierced and closed_back and long_wick and near:
+                        return True, lv
         return False, None
 
     def analyze(self, pair, candles_4h, candles_15m) -> Optional[SMCResult]:
@@ -499,16 +561,40 @@ class SMCEngine:
             last_struct_15 = sl15.last_structure
             last_struct_bias_15 = BEARISH
 
-        # ── Check if price is inside a live 4H OB ──
+        # ── Check if price is inside a live 4H OB, OR recently mitigated one ──
         def price_in_ob(obs, ob_type):
             for ob in obs:
                 if ob.low <= price <= ob.high:
                     return ob, ob_type
             return None, None
 
+        # 1. Is price LITERALLY inside an OB right now?
         hit_ob, hit_type = price_in_ob(obs4_swing, 'Swing')
         if hit_ob is None and not self.swing_only:
             hit_ob, hit_type = price_in_ob(obs4_int, 'Internal')
+
+        currently_in = hit_ob is not None
+        mit_bars_since = None
+        mit_session = None
+
+        # 2. If NOT currently inside, did price tap (mitigate) an OB recently?
+        #    Price may have wicked in and back out between 2-hour scans — that
+        #    mitigation event still arms the setup for `mitigation_window` bars.
+        if hit_ob is None:
+            obs_to_check = list(obs4_swing)
+            if not self.swing_only:
+                obs_to_check += list(obs4_int)
+            best_bars = None
+            for ob in obs_to_check:
+                ob_type = 'Swing' if ob in obs4_swing else 'Internal'
+                mitigated, bars_since, mit_time = self._recent_mitigation(
+                    ob, candles_15m, window_bars=self.mitigation_window)
+                if mitigated and (best_bars is None or bars_since < best_bars):
+                    best_bars = bars_since
+                    hit_ob = ob
+                    hit_type = ob_type
+                    mit_bars_since = bars_since
+                    mit_session = self._session_for(mit_time) if mit_time else None
 
         result = SMCResult(
             pair=pair,
@@ -520,6 +606,12 @@ class SMCEngine:
 
         if hit_ob is not None:
             result.in_ob = True
+            result.currently_in_ob = currently_in
+            result.mitigated = not currently_in   # True if it's a recent-tap, not live
+            result.bars_since_mit = mit_bars_since
+            result.session = mit_session
+            if currently_in and candles_15m:
+                result.session = self._session_for(candles_15m[-1].time)
             result.ob_bias = hit_ob.bias
             result.ob_high = hit_ob.high
             result.ob_low = hit_ob.low
@@ -622,6 +714,51 @@ class SMCEngine:
                 result.near_distance_pips = round(best_dist / pip, 1) if pip else None
 
         return result
+
+    def _recent_mitigation(self, ob, candles_15m, window_bars=20):
+        """
+        Detect whether price has MITIGATED (entered) this 4H OB within the last
+        `window_bars` 15-minute candles - even if price has since wicked back out.
+
+        A real OB setup is an EVENT: price taps the zone, and from that moment you
+        watch the lower timeframe for a reversal. If price enters and leaves
+        between two 2-hour engine scans, the "is price in OB right now?" check
+        misses it. This looks back over recent 15m candles to catch the tap.
+
+        Returns (mitigated, bars_since, mitigation_time).
+        bars_since = how many 15m bars ago the FIRST tap in the window occurred.
+        """
+        n = len(candles_15m)
+        if n == 0:
+            return False, None, None
+        start = max(0, n - window_bars)
+        first_tap_idx = None
+        for i in range(start, n):
+            c = candles_15m[i]
+            if c.high >= ob.low and c.low <= ob.high:
+                first_tap_idx = i
+                break
+        if first_tap_idx is None:
+            return False, None, None
+        bars_since = (n - 1) - first_tap_idx
+        return True, bars_since, candles_15m[first_tap_idx].time
+
+    @staticmethod
+    def _session_for(ts):
+        """
+        Map a UTC timestamp to the active FX session. Returns a short label.
+        Sessions (UTC): Sydney ~22-07, Asian ~00-09, London ~08-17, NY ~13-22.
+        Prioritises NY > London > Asian for a trader's relevance.
+        """
+        from datetime import datetime, timezone
+        h = datetime.fromtimestamp(ts, tz=timezone.utc).hour
+        if 13 <= h < 22:
+            return 'NY'
+        if 8 <= h < 17:
+            return 'London'
+        if (h >= 22) or (h < 9):
+            return 'Asian'
+        return 'Off'
 
     @staticmethod
     def _pip_size(pair):
