@@ -556,13 +556,24 @@ function renderArmed(a) {
       : (x.barsSinceMit!=null
           ? `<span style="color:var(--warn);font-size:8px">TAPPED ${x.barsSinceMit}b ago</span>`
           : '');
+    // break-and-retest progress: which phase the setup is in
+    let phase, phaseColor;
+    if (x.brState === 'broken') {
+      phase = '⚡ 15m BROKE — awaiting retest';
+      phaseColor = 'var(--accent)';
+    } else {
+      phase = '⏳ awaiting 15m break';
+      phaseColor = 'var(--warn)';
+    }
+    const ltfZone = (x.brState==='broken' && x.ltfObLow!=null && x.ltfObHigh!=null)
+      ? `<span style="color:var(--text3,#5a6877);font-size:8px">15m OB ${fmt(x.pair,x.ltfObLow)}–${fmt(x.pair,x.ltfObHigh)}</span>` : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap">
       <span style="font-weight:600;color:#fff;min-width:60px">${x.pair}</span>
       <span style="color:${dirColor};font-size:9px;letter-spacing:0.1em">${arrow} ${x.bias==='bull'?'LONG':'SHORT'}</span>
       ${sessTag}
       ${mitInfo}
-      <span style="color:var(--text3,#5a6877);font-size:9px">${zone}</span>
-      <span style="margin-left:auto;color:var(--warn);font-size:9px;letter-spacing:0.05em">⏳ ${x.m15needed||'15m confirm'}</span>
+      ${ltfZone}
+      <span style="margin-left:auto;color:${phaseColor};font-size:9px;letter-spacing:0.05em">${phase}</span>
     </div>`;
   }).join('');
   el.innerHTML = rows;
