@@ -266,6 +266,10 @@ def scan_once():
             'alert':      ('Bullish' if ob_bull else 'Bearish') + res.ob_type + 'OB',
             'timeframe':  '4H',
             'aligned':    struct_aligned,
+            'session':    res.session,
+            'mitigated':  res.mitigated,
+            'currentlyIn': res.currently_in_ob,
+            'barsSinceMit': res.bars_since_mit,
             'receivedAt': datetime.now(timezone.utc).isoformat(),
         }
 
