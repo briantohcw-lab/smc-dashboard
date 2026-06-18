@@ -782,10 +782,25 @@ class SMCEngine:
                             ob_i = break_idx - 1
                         ob_high = max(seg[ob_i].high, seg[ob_i].open)
                         ob_low = min(seg[ob_i].close, seg[ob_i].low)
+                        # INVALIDATION: a bearish 15m OB is dead if, after it
+                        # formed, any candle CLOSED above its high — price
+                        # reclaimed the zone, so it's no longer a short setup.
+                        invalidated = any(
+                            seg[m].close > ob_high
+                            for m in range(ob_i + 1, len(seg))
+                        )
+                        if invalidated:
+                            # this OB failed; don't signal it. keep scanning for
+                            # an earlier/other valid break, else report none.
+                            continue
                         # is price NOW back inside this OB (the retest)?
                         last = seg[-1]
                         in_zone = last.high >= ob_low and last.low <= ob_high
-                        state = 'retest' if in_zone else 'broken'
+                        # additionally require the retest candle to not be
+                        # slicing straight through: its CLOSE must stay at or
+                        # above the OB low (i.e. not closing out the bottom).
+                        holds = last.close >= ob_low
+                        state = 'retest' if (in_zone and holds) else 'broken'
                         return {'state': state, 'ob_high': ob_high,
                                 'ob_low': ob_low, 'break_idx': base + break_idx}
         else:
@@ -804,9 +819,24 @@ class SMCEngine:
                             ob_i = break_idx - 1
                         ob_high = max(seg[ob_i].open, seg[ob_i].high)
                         ob_low = min(seg[ob_i].low, seg[ob_i].close)
+                        # INVALIDATION: a bullish 15m OB is dead if, after it
+                        # formed, any candle CLOSED below its low — price sliced
+                        # through the zone (bearish), so it's no longer a long
+                        # setup. THIS is the EURJPY bug: price retested then
+                        # broke down through the OB, but the old check still saw
+                        # price "in the zone" on the way down and fired LONG.
+                        invalidated = any(
+                            seg[m].close < ob_low
+                            for m in range(ob_i + 1, len(seg))
+                        )
+                        if invalidated:
+                            continue
                         last = seg[-1]
                         in_zone = last.high >= ob_low and last.low <= ob_high
-                        state = 'retest' if in_zone else 'broken'
+                        # retest candle must not be closing out the top edge
+                        # (slicing down through); its close must hold at/below high
+                        holds = last.close <= ob_high
+                        state = 'retest' if (in_zone and holds) else 'broken'
                         return {'state': state, 'ob_high': ob_high,
                                 'ob_low': ob_low, 'break_idx': base + break_idx}
         return {'state': 'none'}
