@@ -364,6 +364,18 @@
   <div class="stat"><div class="stat-val bear" id="s-ber">0</div><div class="stat-lbl">BEARISH HITS</div></div>
   <div class="stat"><div class="stat-val warn" id="s-hcf">0</div><div class="stat-lbl">HIGH CONFLUENCE</div></div>
   <div class="stat"><div class="stat-val acc"  id="s-prs">0</div><div class="stat-lbl">PAIRS</div></div>
+  <div class="stat" title="Auto-tracked: of closed signals, how many reached TP before SL (measured on the data feed — indicative only)">
+    <div class="stat-val" id="s-wr" style="color:var(--warn)">—</div>
+    <div class="stat-lbl">WIN RATE</div></div>
+</div>
+<div id="trackerBar" style="display:none;padding:6px 14px;font-size:10px;letter-spacing:0.05em;color:var(--text2);border-bottom:1px solid var(--border);background:var(--panel,#0d1117)">
+  <span style="color:var(--bull)">✅ <span id="tk-tp">0</span> TP</span>
+  &nbsp;·&nbsp;
+  <span style="color:var(--bear)">❌ <span id="tk-sl">0</span> SL</span>
+  &nbsp;·&nbsp;
+  <span style="color:var(--text3,#5a6877)">⏳ <span id="tk-open">0</span> open</span>
+  &nbsp;·&nbsp;
+  <span id="tk-note" style="color:var(--text3,#5a6877)">tracking signal outcomes (feed-based, indicative)</span>
 </div>
 
 <!-- ── LEGEND ─────────────────────────────────────── -->
@@ -371,7 +383,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:var(--bull)"></div>4H Bullish OB + 15m align ↑</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--bear)"></div>4H Bearish OB + 15m align ↓</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div>High confluence 3+</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Dots = confluence score /5</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Dots = confluence score /6</div>
 </div>
 
 <!-- ── MAIN GRID ───────────────────────────────────── -->
@@ -504,7 +516,7 @@ function renderHistory(h) {
       <span style="font-weight:600;color:#fff;min-width:60px">${x.pair}</span>
       <span style="color:${dirColor};font-size:9px;letter-spacing:0.08em">${arrow}${x.bias==='bull'?'L':'S'}</span>
       <span style="color:var(--text2);font-size:9px">${x.obType}</span>
-      <span style="margin-left:auto;color:${confColor};font-weight:600">${x.confluence}/5</span>
+      <span style="margin-left:auto;color:${confColor};font-weight:600">${x.confluence}/6</span>
     </div>`;
   }).join('');
   el.innerHTML = rows;
@@ -707,11 +719,11 @@ function emptyCol(dir) {
 function card(s) {
   const c   = conf(s);
   const dep = depth(s);
-  const pct = Math.round((c/5)*100);
+  const pct = Math.round((c/6)*100);
   const fr  = isFresh(s.receivedAt);
   const mc  = s.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
 
-  const dots = [1,2,3,4,5].map(i =>
+  const dots = [1,2,3,4,5,6].map(i =>
     `<div class="dot ${i<=c?'on '+s.bias:''}"></div>`
   ).join('');
 
@@ -765,7 +777,7 @@ function card(s) {
       <span style="margin-left:auto;color:var(--text3,#5a6877);font-size:8px;letter-spacing:0.05em">REFERENCE ONLY</span>
     </div>` : '' }
     <div class="card-foot">
-      <span style="color:${c>=3?'var(--warn)':'var(--dim)'}">CONF ${c}/5</span>
+      <span style="color:${c>=3?'var(--warn)':'var(--dim)'}">CONF ${c}/6</span>
       <div class="dots">${dots}</div>
     </div>
   </div>`;
@@ -801,7 +813,7 @@ function showTip(e, enc) {
       <span class="tv" style="color:${s.sweep?'var(--warn)':'var(--dim)'}">${s.sweep?'YES':'NO'}</span></div>
     <div class="tdiv"></div>
     <div class="tr"><span class="tl">Confluence</span>
-      <span class="tv" style="color:${c>=3?'var(--warn)':'var(--text)'}">${c}/5</span></div>
+      <span class="tv" style="color:${c>=3?'var(--warn)':'var(--text)'}">${c}/6</span></div>
     <div class="tr"><span class="tl">Received</span> <span class="tv">${ago(s.receivedAt)}</span></div>
   `;
 
@@ -901,6 +913,25 @@ async function pollStatus() {
       } else {
         meter.textContent = `⛁ ${s.credits_used}/${limit} credits`;
         meter.title = 'Twelve Data API credits used today';
+      }
+    }
+
+    // ── auto-tracker scoreboard ──
+    const tk = s.tracker || {};
+    const bar = document.getElementById('trackerBar');
+    const wrEl = document.getElementById('s-wr');
+    if (tk.total) {
+      document.getElementById('tk-tp').textContent = tk.tp || 0;
+      document.getElementById('tk-sl').textContent = tk.sl || 0;
+      document.getElementById('tk-open').textContent = tk.open || 0;
+      if (bar) bar.style.display = 'block';
+      if (wrEl) {
+        if (tk.win_rate != null) {
+          wrEl.textContent = tk.win_rate + '%';
+          wrEl.style.color = tk.win_rate >= 50 ? 'var(--bull)' : 'var(--bear)';
+        } else {
+          wrEl.textContent = '—';
+        }
       }
     }
 
