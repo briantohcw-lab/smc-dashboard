@@ -60,6 +60,8 @@ signals = []          # current live signals shown on dashboard
 armed = []            # price in 4H OB but 15m not yet aligned (awaiting confirm)
 watchlist = []        # pairs approaching an OB (not yet inside)
 history = []          # rolling history of 2+ confluence signals (max 50 kept)
+tracked = []          # auto-tracker: signals with SL/TP, outcome checked each scan
+tracker_stats = {'tp': 0, 'sl': 0, 'open': 0, 'total': 0}
 scan_log = {          # diagnostics shown in dashboard footer
     'last_scan': None,
     'last_error': None,
@@ -184,6 +186,8 @@ def fetch_candles(symbol, interval, outputsize):
 def scan_once():
     new_signals = []
     new_armed = []
+    latest_prices = {}    # pair -> latest price, for the auto-tracker
+    latest_hl = {}        # pair -> (high, low) of last 15m candle
     watch = []
     scanned = 0
 
@@ -226,6 +230,14 @@ def scan_once():
         res = engine.analyze(symbol, c4, c15)
         if res is None:
             continue
+
+        # capture latest price for the auto-tracker (uses 15m close as "now")
+        latest_prices[symbol.replace('/', '')] = round(res.price, 5)
+        # also track the high/low of the most recent 15m candle so we can detect
+        # whether price WICKED through SL/TP, not just closed through
+        if c15:
+            last15 = c15[-1]
+            latest_hl[symbol.replace('/', '')] = (last15.high, last15.low)
 
         # If NOT in an OB, add to the watchlist if there's a nearby OB
         if not res.in_ob:
@@ -322,6 +334,67 @@ def scan_once():
         while len(history) > 50:
             history.pop()
 
+        # ── AUTO TRACKER: register new signals with their SL/TP ──
+        # Each new signal becomes an "open" tracked position. On subsequent
+        # scans we check whether price reached TP or SL (measured on the Twelve
+        # Data feed — indicative, not your exact broker fills).
+        for s in new_signals:
+            sig_id = f"{s['pair']}|{s['bias']}|{s['obLow']}|{s['receivedAt']}"
+            exists = any(tr['id'] == sig_id for tr in tracked)
+            if not exists and s.get('slPrice') and s.get('tpPrice'):
+                tracked.insert(0, {
+                    'id': sig_id,
+                    'pair': s['pair'],
+                    'bias': s['bias'],
+                    'entry': s['price'],
+                    'sl': s['slPrice'],
+                    'tp': s['tpPrice'],
+                    'confluence': s['confluence'],
+                    'factors': s['factors'],
+                    'openedAt': s['receivedAt'],
+                    'outcome': 'open',
+                    'closedAt': None,
+                })
+        while len(tracked) > 100:
+            tracked.pop()
+
+        # ── AUTO TRACKER: check open positions against latest price ──
+        # For a LONG: TP hit if price high >= tp; SL hit if price low <= sl.
+        # For a SHORT: TP hit if price low <= tp; SL hit if price high >= sl.
+        # If both appear hit in the same candle we can't know order, so we count
+        # it conservatively as SL (assume the stop was tagged first).
+        for tr in tracked:
+            if tr['outcome'] != 'open':
+                continue
+            hl = latest_hl.get(tr['pair'])
+            if not hl:
+                continue
+            hi, lo = hl
+            is_long = (tr['bias'] == 'bull')
+            tp, sl = tr['tp'], tr['sl']
+            hit_tp = (hi >= tp) if is_long else (lo <= tp)
+            hit_sl = (lo <= sl) if is_long else (hi >= sl)
+            if hit_sl and hit_tp:
+                tr['outcome'] = 'sl'   # conservative: assume stop first
+                tr['closedAt'] = datetime.now(timezone.utc).isoformat()
+            elif hit_tp:
+                tr['outcome'] = 'tp'
+                tr['closedAt'] = datetime.now(timezone.utc).isoformat()
+            elif hit_sl:
+                tr['outcome'] = 'sl'
+                tr['closedAt'] = datetime.now(timezone.utc).isoformat()
+
+        # recompute scoreboard
+        tp_n = sum(1 for tr in tracked if tr['outcome'] == 'tp')
+        sl_n = sum(1 for tr in tracked if tr['outcome'] == 'sl')
+        open_n = sum(1 for tr in tracked if tr['outcome'] == 'open')
+        tracker_stats['tp'] = tp_n
+        tracker_stats['sl'] = sl_n
+        tracker_stats['open'] = open_n
+        tracker_stats['total'] = len(tracked)
+        closed = tp_n + sl_n
+        tracker_stats['win_rate'] = round(100 * tp_n / closed) if closed else None
+
         scan_log['last_scan'] = datetime.now(timezone.utc).isoformat()
         scan_log['pairs_scanned'] = scanned
         scan_log['scanning'] = False
@@ -378,6 +451,15 @@ def get_history():
     with _lock:
         return jsonify(history[:10])   # last 10 for the dashboard table
 
+@app.route('/tracker')
+def get_tracker():
+    """Auto-tracker: outcomes of past signals + win/loss scoreboard."""
+    with _lock:
+        return jsonify({
+            'stats': tracker_stats,
+            'positions': tracked[:50],
+        })
+
 @app.route('/status')
 def status():
     used = _load_credits()
@@ -394,6 +476,7 @@ def status():
         'htf': HTF_TF,
         'ltf': LTF_TF,
         'candle_tz': CANDLE_TZ,
+        'tracker': tracker_stats,
     })
 
 @app.route('/scan-now')
