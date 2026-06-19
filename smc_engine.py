@@ -677,8 +677,28 @@ class SMCEngine:
             if br['state'] in ('broken', 'retest'):
                 result.ltf_ob_high = round(br['ob_high'], 5)
                 result.ltf_ob_low = round(br['ob_low'], 5)
-            # promote to full signal ONLY on retest of the 15m OB
-            result.struct_aligned = (br['state'] == 'retest')
+
+            # CRITICAL DIRECTION GUARD: the break-and-retest must agree with the
+            # CURRENT 15m structure. The detector can find an OLD break (e.g. a
+            # bearish break early in the window) even though the 15m has since
+            # gone the other way. Without this guard, a SHORT signal can fire
+            # while the 15m is making bullish BOS (the AUDCHF bug). Only honour
+            # a 'retest' if the live 15m trend matches the OB/setup direction.
+            ob_bull = (hit_ob.bias == BULLISH)
+            trend_agrees = (
+                (ob_bull and trend15 == BULLISH) or
+                (not ob_bull and trend15 == BEARISH)
+            )
+            valid_retest = (br['state'] == 'retest') and trend_agrees
+            # if the break disagrees with current 15m trend, it's stale/invalid:
+            # drop it back so it doesn't show a misleading 'broken' state either.
+            if not trend_agrees and br['state'] in ('broken', 'retest'):
+                result.br_state = None
+                result.ltf_ob_high = None
+                result.ltf_ob_low = None
+
+            # promote to full signal ONLY on a direction-consistent retest
+            result.struct_aligned = valid_retest
 
             # ── Structural SL/TP REFERENCE (mechanical, not advice) ──
             # SL: just beyond the OB's far edge with a small ATR-based buffer.
@@ -766,11 +786,14 @@ class SMCEngine:
         highs, lows = self._swing_levels(seg, left=2, right=2)
 
         if bias == BEARISH:
-            # find a swing low that price later CLOSED below = bearish break
+            # find a swing low that price later CLOSED below = bearish break.
+            # Only consider RECENT breaks — an old break in the window is stale
+            # and likely superseded by newer structure.
+            recent_cut = len(seg) - min(len(seg), self.mitigation_window)
             for (pivot_i, pivot_lvl) in lows:
                 # scan candles after the pivot for a close below it (the break)
                 for j in range(pivot_i + 1, len(seg)):
-                    if seg[j].close < pivot_lvl:
+                    if seg[j].close < pivot_lvl and j >= recent_cut:
                         break_idx = j
                         # 15m sell OB = last bullish (up) candle before break_idx
                         ob_i = None
@@ -805,9 +828,10 @@ class SMCEngine:
                                 'ob_low': ob_low, 'break_idx': base + break_idx}
         else:
             # bullish: find a swing high price CLOSED above = bullish break
+            recent_cut = len(seg) - min(len(seg), self.mitigation_window)
             for (pivot_i, pivot_lvl) in highs:
                 for j in range(pivot_i + 1, len(seg)):
-                    if seg[j].close > pivot_lvl:
+                    if seg[j].close > pivot_lvl and j >= recent_cut:
                         break_idx = j
                         # 15m buy OB = last bearish (down) candle before break
                         ob_i = None
