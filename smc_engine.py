@@ -68,6 +68,7 @@ class SMCResult:
     fvg: bool = False                # Fair Value Gap supporting the OB direction
     eqhl: bool = False               # Equal highs/lows (liquidity) near the zone
     liquidity_sweep: bool = False    # recent sweep of a prior high/low (stop hunt)
+    double_tb: bool = False          # double top (bearish) / double bottom (bullish)
     sweep_level: float = None        # the level that was swept
     confluence: int = 0              # total score 1-5
     factors: list = None             # human-readable list of met factors
@@ -651,7 +652,11 @@ class SMCEngine:
             result.liquidity_sweep = swept
             result.sweep_level = swept_level
 
-            # ── Total confluence score (max 5) ──
+            # Factor 6: Double top (bearish) / double bottom (bullish) at the zone
+            result.double_tb = self._detect_double_top_bottom(
+                candles_15m, hit_ob.bias, price, tol)
+
+            # ── Total confluence score (max 6) ──
             factors = ['4H OB']
             score = 1
             if struct_aligned:
@@ -662,6 +667,9 @@ class SMCEngine:
                 score += 1; factors.append('EQH/EQL')
             if result.liquidity_sweep:
                 score += 1; factors.append('Liquidity Sweep')
+            if result.double_tb:
+                score += 1
+                factors.append('Double Top' if not ob_bull else 'Double Bottom')
 
             result.confluence = score
             result.factors = factors
@@ -909,6 +917,53 @@ class SMCEngine:
         if (h >= 22) or (h < 9):
             return 'Asian'
         return 'Off'
+
+    def _detect_double_top_bottom(self, candles, bias, near_price, tolerance):
+        """
+        Double top (bearish) / double bottom (bullish) detection.
+        In SMC terms these ARE liquidity structures: two equal highs = buyside
+        liquidity price failed to break (exhaustion -> bearish); two equal lows
+        = sellside liquidity that held (exhaustion -> bullish). Overlaps the
+        engine's existing liquidity concept, reinforcing the method.
+
+        Strict criteria (real patterns are messier than the textbook):
+          - two SWING pivots at roughly EQUAL level (within 10% ATR)
+          - separated by >= 3 bars with a genuine pullback between them
+          - near the current price (within ~1.5 ATR)
+        For BEARISH we look for a double TOP; for BULLISH, a double BOTTOM.
+        """
+        if tolerance <= 0:
+            return False
+        highs, lows = self._swing_levels(candles, left=2, right=2)
+        eq_tol = tolerance * 0.10
+        near_window = tolerance * 1.5
+        min_sep = 3
+        min_pullback = tolerance * 0.5
+
+        pts = highs if bias == BEARISH else lows
+        for a in range(len(pts)):
+            for b in range(a + 1, len(pts)):
+                idx_a, lvl_a = pts[a]
+                idx_b, lvl_b = pts[b]
+                if abs(idx_a - idx_b) < min_sep:
+                    continue
+                if abs(lvl_a - lvl_b) >= eq_tol:
+                    continue
+                if abs(near_price - lvl_a) >= near_window:
+                    continue
+                lo, hi = sorted((idx_a, idx_b))
+                between = candles[lo:hi + 1]
+                if not between:
+                    continue
+                if bias == BEARISH:
+                    trough = min(c.low for c in between)
+                    if (min(lvl_a, lvl_b) - trough) >= min_pullback:
+                        return True
+                else:
+                    peak = max(c.high for c in between)
+                    if (peak - max(lvl_a, lvl_b)) >= min_pullback:
+                        return True
+        return False
 
     @staticmethod
     def _pip_size(pair):
