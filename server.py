@@ -314,44 +314,44 @@ def scan_once():
         for s in new_signals:
             if s['confluence'] >= 2:
                 # dedupe: skip if same pair+bias+zone+score already the most
-                # recent history entry for that pair
+                # recent history entry for that pair. Use .get() so a missing
+                # key never crashes the scan loop.
                 dup = next((h for h in history
-                            if h['pair'] == s['pair']
-                            and h['bias'] == s['bias']
-                            and h['obLow'] == s['obLow']
-                            and h['confluence'] == s['confluence']), None)
+                            if h.get('pair') == s.get('pair')
+                            and h.get('bias') == s.get('bias')
+                            and h.get('obLow') == s.get('obLow')
+                            and h.get('confluence') == s.get('confluence')), None)
                 if not dup:
                     history.insert(0, {
-                        'pair':       s['pair'],
-                        'bias':       s['bias'],
-                        'obType':     s['obType'],
-                        'confluence': s['confluence'],
-                        'factors':    s['factors'],
-                        'price':      s['price'],
-                        'time':       s['receivedAt'],
+                        'pair':       s.get('pair'),
+                        'bias':       s.get('bias'),
+                        'obType':     s.get('obType'),
+                        'obLow':      s.get('obLow'),
+                        'obHigh':     s.get('obHigh'),
+                        'confluence': s.get('confluence'),
+                        'factors':    s.get('factors'),
+                        'price':      s.get('price'),
+                        'time':       s.get('receivedAt'),
                     })
         # keep history bounded
         while len(history) > 50:
             history.pop()
 
         # ── AUTO TRACKER: register new signals with their SL/TP ──
-        # Each new signal becomes an "open" tracked position. On subsequent
-        # scans we check whether price reached TP or SL (measured on the Twelve
-        # Data feed — indicative, not your exact broker fills).
         for s in new_signals:
-            sig_id = f"{s['pair']}|{s['bias']}|{s['obLow']}|{s['receivedAt']}"
+            sig_id = f"{s.get('pair')}|{s.get('bias')}|{s.get('obLow')}|{s.get('receivedAt')}"
             exists = any(tr['id'] == sig_id for tr in tracked)
             if not exists and s.get('slPrice') and s.get('tpPrice'):
                 tracked.insert(0, {
                     'id': sig_id,
-                    'pair': s['pair'],
-                    'bias': s['bias'],
-                    'entry': s['price'],
-                    'sl': s['slPrice'],
-                    'tp': s['tpPrice'],
-                    'confluence': s['confluence'],
-                    'factors': s['factors'],
-                    'openedAt': s['receivedAt'],
+                    'pair': s.get('pair'),
+                    'bias': s.get('bias'),
+                    'entry': s.get('price'),
+                    'sl': s.get('slPrice'),
+                    'tp': s.get('tpPrice'),
+                    'confluence': s.get('confluence'),
+                    'factors': s.get('factors'),
+                    'openedAt': s.get('receivedAt'),
                     'outcome': 'open',
                     'closedAt': None,
                 })
