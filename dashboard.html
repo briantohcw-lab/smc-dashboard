@@ -3,979 +3,401 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SMC OB Confluence Scanner</title>
+<title>SMC OB Confluence</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
-
-  :root {
-    --bg:       #0a0c0f;
-    --surface:  #10141a;
-    --border:   #1e2530;
-    --border2:  #2a3342;
-    --bull:     #00d97e;
-    --bear:     #ff4466;
-    --warn:     #f5a623;
-    --dim:      #4a5568;
-    --text:     #c8d3e0;
-    --text2:    #7a8999;
-    --accent:   #3b82f6;
-    --hit:      rgba(0,217,126,0.08);
-    --hit-bear: rgba(255,68,102,0.08);
-    --glow-b:   0 0 12px rgba(0,217,126,0.3);
-    --glow-r:   0 0 12px rgba(255,68,102,0.3);
+  :root{
+    --bg:#07090d; --panel:#0d1117; --panel2:#111722;
+    --border:#1b2230; --border2:#2a3344;
+    --text:#e6edf3; --text2:#8b98a9; --text3:#5a6877;
+    --bull:#3fd68b; --bear:#ff5d6c; --warn:#f0b429; --accent:#58a6ff;
+    --dim:#39424f;
   }
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    min-height: 100vh;
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"SF Mono","Consolas","Roboto Mono",monospace;
+    font-size:13px; line-height:1.5; padding-bottom:40px;
   }
-
-  body::before {
-    content: '';
-    position: fixed; inset: 0;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
-    pointer-events: none; z-index: 999;
+  .wrap{max-width:1400px;margin:0 auto}
+  header{
+    display:flex;align-items:center;gap:14px;padding:14px 16px;
+    border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap;
   }
-
-  /* ── Header ── */
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 24px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    position: sticky; top: 0; z-index: 50;
-  }
-  .logo { display: flex; align-items: center; gap: 10px; }
-  .logo-icon {
-    width: 28px; height: 28px;
-    background: linear-gradient(135deg, var(--bull), var(--accent));
-    clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
-    flex-shrink: 0;
-  }
-  .logo-text { font-size: 14px; font-weight: 600; letter-spacing: 0.12em; color: #fff; }
-  .logo-sub  { font-size: 10px; color: var(--text2); letter-spacing: 0.18em; margin-top: 2px; }
-
-  .header-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
-
-  .conn-badge {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 10px; letter-spacing: 0.12em;
-    padding: 4px 10px; border-radius: 2px; transition: all 0.3s;
-  }
-  .conn-badge.connected    { color: var(--bull); border: 1px solid rgba(0,217,126,0.3); }
-  .conn-badge.disconnected { color: var(--bear); border: 1px solid rgba(255,68,102,0.3); }
-  .conn-badge.connecting   { color: var(--warn); border: 1px solid rgba(245,166,35,0.3); }
-  .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .conn-badge.connected .conn-dot { animation: pulse 1.4s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
-
-  #clock { font-size: 11px; color: var(--text2); letter-spacing: 0.05em; }
-
-  /* ── Session bar ── */
-  .session-bar {
-    display: flex; padding: 0 24px;
-    border-bottom: 1px solid var(--border);
-    font-size: 9px; letter-spacing: 0.12em; overflow-x: auto;
-  }
-  .session {
-    padding: 6px 16px 6px 0; margin-right: 16px;
-    color: var(--text2); border-right: 1px solid var(--border);
-    display: flex; align-items: center; gap: 5px; white-space: nowrap;
-  }
-  .session:last-child { border: none; }
-  .session.active { color: #fff; }
-  .session-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border2); flex-shrink: 0; }
-  .session.active .session-dot { background: var(--bull); box-shadow: 0 0 5px var(--bull); }
-
-  /* ── Controls ── */
-  .controls {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 24px; border-bottom: 1px solid var(--border);
-    background: rgba(16,20,26,0.6); flex-wrap: wrap;
-  }
-  .ctrl-label { font-size: 10px; color: var(--text2); letter-spacing: 0.12em; white-space: nowrap; }
-  .filter-group { display: flex; gap: 4px; }
-  .filter-btn {
-    padding: 4px 10px; border: 1px solid var(--border2);
-    background: transparent; color: var(--text2);
-    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
-    letter-spacing: 0.08em; cursor: pointer; border-radius: 2px; transition: all 0.15s;
-  }
-  .filter-btn:hover { border-color: var(--accent); color: var(--text); }
-  .filter-btn.active      { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .filter-btn.bull-active { background: var(--bull);   border-color: var(--bull);   color: #000; }
-  .filter-btn.bear-active { background: var(--bear);   border-color: var(--bear);   color: #fff; }
-  .sep { width: 1px; height: 20px; background: var(--border2); margin: 0 2px; flex-shrink: 0; }
-
-  .right-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  #lastUpdateEl { font-size: 9px; color: var(--dim); white-space: nowrap; }
-  .ctrl-btn {
-    padding: 5px 12px; border: 1px solid var(--border2);
-    background: transparent; color: var(--text2);
-    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
-    cursor: pointer; border-radius: 2px; transition: all 0.2s; white-space: nowrap;
-  }
-  .ctrl-btn:hover { border-color: var(--accent); color: var(--text); }
-  #clearBtn { border-color: rgba(255,68,102,0.3); color: var(--bear); }
-  #clearBtn:hover { background: rgba(255,68,102,0.1); border-color: var(--bear); }
-
-  /* ── Stats bar ── */
-  .stats-bar {
-    display: flex; padding: 0 24px;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-  }
-  .stat {
-    padding: 10px 24px 10px 0; margin-right: 24px;
-    border-right: 1px solid var(--border); white-space: nowrap; flex-shrink: 0;
-  }
-  .stat:last-child { border: none; }
-  .stat-val { font-size: 22px; font-weight: 600; line-height: 1; }
-  .stat-lbl { font-size: 9px; color: var(--text2); letter-spacing: 0.12em; margin-top: 3px; }
-  .stat-val.bull { color: var(--bull); }
-  .stat-val.bear { color: var(--bear); }
-  .stat-val.warn { color: var(--warn); }
-  .stat-val.acc  { color: var(--accent); }
-
-  /* ── Legend ── */
-  .legend {
-    padding: 7px 24px; display: flex; gap: 16px; flex-wrap: wrap;
-    border-bottom: 1px solid var(--border);
-    font-size: 9px; color: var(--text2); letter-spacing: 0.08em;
-  }
-  .legend-item { display: flex; align-items: center; gap: 5px; }
-  .legend-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-
-  /* ── Main grid ── */
-  main {
-    padding: 20px 24px;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  }
-  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
-
-  .section-label {
-    font-size: 10px; letter-spacing: 0.2em; color: var(--text2);
-    padding-bottom: 10px; border-bottom: 1px solid var(--border);
-    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
-  }
-  .section-label::before { content:''; display:inline-block; width:3px; height:12px; }
-  .bull-col .section-label::before { background: var(--bull); box-shadow: var(--glow-b); }
-  .bear-col .section-label::before { background: var(--bear); box-shadow: var(--glow-r); }
-  .count-pill {
-    margin-left: auto; background: var(--border);
-    color: var(--text2); font-size: 9px; padding: 2px 8px; border-radius: 10px;
-  }
-
-  /* ── Signal cards ── */
-  .card {
-    border: 1px solid var(--border2); border-radius: 3px;
-    margin-bottom: 8px; overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-    cursor: default; position: relative;
-  }
-  .card:hover { transform: translateY(-1px); }
-  .card.bull  { border-left: 3px solid var(--bull); background: var(--hit); }
-  .card.bull:hover { border-color: var(--bull); box-shadow: var(--glow-b); }
-  .card.bear  { border-left: 3px solid var(--bear); background: var(--hit-bear); }
-  .card.bear:hover { border-color: var(--bear); box-shadow: var(--glow-r); }
-  .card.fresh { animation: slideIn 0.5s ease; }
-  @keyframes slideIn { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
-
-  .new-badge {
-    position: absolute; top: 8px; right: 8px;
-    font-size: 8px; padding: 2px 6px; letter-spacing: 0.1em;
-    background: rgba(245,166,35,0.2); color: var(--warn);
-    border: 1px solid rgba(245,166,35,0.4); border-radius: 1px;
-    animation: blink 0.8s step-end 8;
-  }
-  @keyframes blink { 50%{opacity:0} }
-
-  .card-top {
-    display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px;
-  }
-  .pair-name { font-size: 16px; font-weight: 600; color: #fff; letter-spacing: 0.04em; }
-  .dir-tag {
-    font-size: 9px; font-weight: 600; letter-spacing: 0.12em;
-    padding: 2px 8px; border-radius: 1px;
-  }
-  .bull .dir-tag { background: rgba(0,217,126,0.18); color: var(--bull); border: 1px solid rgba(0,217,126,0.3); }
-  .bear .dir-tag { background: rgba(255,68,102,0.18); color: var(--bear); border: 1px solid rgba(255,68,102,0.3); }
-  .ob-tag {
-    font-size: 9px; color: var(--warn); letter-spacing: 0.1em;
-    border: 1px solid rgba(245,166,35,0.3); padding: 2px 7px;
-  }
-  .tf-tag {
-    font-size: 9px; color: var(--accent); letter-spacing: 0.1em;
-    border: 1px solid rgba(59,130,246,0.3); padding: 2px 7px;
-  }
-
-  .conf-track { height: 2px; background: var(--border); margin: 0 12px 8px; border-radius: 1px; overflow:hidden; }
-  .conf-fill  { height: 100%; border-radius: 1px; transition: width 0.5s ease; }
-  .bull .conf-fill { background: linear-gradient(90deg, var(--bull), #00ffb3); }
-  .bear .conf-fill { background: linear-gradient(90deg, var(--bear), #ff8fa3); }
-
-  .card-grid {
-    padding: 0 12px 10px;
-    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
-  }
-  .m-lbl { font-size: 9px; color: var(--text2); letter-spacing: 0.08em; margin-bottom: 3px; }
-  .m-val { font-size: 12px; font-weight: 500; line-height: 1.3; }
-
-  .dep-badge { font-size: 9px; padding: 2px 6px; border-radius: 1px; display: inline-block; }
-  .dep-shallow { background:rgba(245,166,35,0.15); color:var(--warn);   border:1px solid rgba(245,166,35,0.3); }
-  .dep-mid     { background:rgba(59,130,246,0.15);  color:var(--accent); border:1px solid rgba(59,130,246,0.3); }
-  .dep-deep    { background:rgba(0,217,126,0.15);   color:var(--bull);   border:1px solid rgba(0,217,126,0.3); }
-  .bear .dep-deep { background:rgba(255,68,102,0.15); color:var(--bear); border-color:rgba(255,68,102,0.3); }
-
-  .card-foot {
-    padding: 6px 12px; border-top: 1px solid var(--border);
-    display: flex; align-items: center;
-    font-size: 9px; color: var(--text2);
-  }
-  .dots { display: flex; gap: 3px; margin-left: auto; }
-  .dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--border2); }
-  .dot.on.bull { background: var(--bull); box-shadow: 0 0 4px var(--bull); }
-  .dot.on.bear { background: var(--bear); box-shadow: 0 0 4px var(--bear); }
-
-  /* ── Empty / waiting ── */
-  .empty-col {
-    padding: 28px 16px; text-align: center;
-    color: var(--dim); font-size: 10px; letter-spacing: 0.15em;
-    border: 1px dashed var(--border); border-radius: 3px;
-  }
-  .pulse-text { margin-top: 8px; font-size: 9px; animation: fade 1.5s ease-in-out infinite; }
-  @keyframes fade { 0%,100%{opacity:0.3} 50%{opacity:1} }
-
-  /* ── Tooltip ── */
-  #tip {
-    position: fixed; background: #0d1117;
-    border: 1px solid var(--border2); padding: 14px 16px;
-    font-size: 11px; max-width: 270px; z-index: 200;
-    pointer-events: none; opacity: 0; transition: opacity 0.15s;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.6); border-radius: 3px;
-  }
-  #tip.on { opacity: 1; }
-  .tr { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
-  .tl { color: var(--text2); }
-  .tv { color: var(--text); font-weight: 500; text-align: right; }
-  .tdiv { border-top: 1px solid var(--border); margin: 8px 0; }
-
-  /* ── Toast ── */
-  #toast {
-    position: fixed; bottom: 20px; right: 20px;
-    background: var(--surface); border: 1px solid var(--border2);
-    padding: 10px 16px; font-size: 11px; border-radius: 3px;
-    transform: translateY(70px); transition: transform 0.3s ease;
-    z-index: 300; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    max-width: 300px;
-  }
-  #toast.on { transform: translateY(0); }
-
-  /* ── Mobile tweaks ── */
-  @media (max-width: 600px) {
-    header { padding: 10px 14px; }
-    .logo-text { font-size: 12px; }
-    .logo-sub  { display: none; }
-    main { padding: 12px 14px; gap: 12px; }
-    .controls { padding: 8px 14px; }
-    .stats-bar { padding: 0 14px; }
-    .session-bar { padding: 0 14px; }
-    .legend { padding: 6px 14px; }
-  }
-
-  /* scrollbar */
-  ::-webkit-scrollbar { width: 3px; height: 3px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  .logo{display:flex;align-items:center;gap:11px}
+  .logo-mark{width:38px;height:38px;border-radius:9px;flex-shrink:0;background:linear-gradient(135deg,#2dd4bf,#3b82f6)}
+  .logo-txt h1{font-size:15px;letter-spacing:0.14em;font-weight:700}
+  .logo-txt p{font-size:9px;letter-spacing:0.1em;color:var(--text2);margin-top:2px}
+  .live{display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:6px;border:1px solid var(--bull);color:var(--bull);font-size:10px;letter-spacing:0.12em}
+  .live .dot{width:7px;height:7px;border-radius:50%;background:var(--bull);animation:pulse 1.5s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  #creditMeter{padding:5px 11px;border-radius:6px;border:1px solid var(--border2);color:var(--text2);font-size:10px;letter-spacing:0.05em;white-space:nowrap}
+  #clock{color:var(--text3);font-size:11px;letter-spacing:0.08em;margin-left:auto}
+  .sessions{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--panel);overflow-x:auto}
+  .session{display:flex;align-items:center;gap:7px;padding:11px 18px;font-size:10px;letter-spacing:0.12em;color:var(--text3);border-right:1px solid var(--border);white-space:nowrap}
+  .session-dot{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .session.active{color:var(--text)}
+  .session.active .session-dot{background:var(--bull);box-shadow:0 0 6px var(--bull)}
+  #pollStatus{margin-left:auto;border-right:none;color:var(--accent)}
+  .scoreboard{display:none;align-items:center;gap:18px;padding:8px 16px;font-size:10px;letter-spacing:0.06em;border-bottom:1px solid var(--border);background:var(--panel2);flex-wrap:wrap}
+  .scoreboard.show{display:flex}
+  .sb-item{display:flex;align-items:center;gap:6px}
+  .sb-val{font-weight:700;font-size:13px}
+  .stats{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
+  .stat{padding:14px 20px;border-right:1px solid var(--border);min-width:120px}
+  .stat-val{font-size:26px;font-weight:700;line-height:1}
+  .stat-lbl{font-size:9px;letter-spacing:0.12em;color:var(--text2);margin-top:6px}
+  .stat-val.bull{color:var(--bull)} .stat-val.bear{color:var(--bear)}
+  .stat-val.warn{color:var(--warn)} .stat-val.acc{color:var(--accent)}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;padding:12px 16px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)}
+  .legend-item{display:flex;align-items:center;gap:7px}
+  .legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  section{padding:0 16px}
+  .sec-head{display:flex;align-items:center;gap:10px;padding:18px 0 12px;font-size:11px;letter-spacing:0.16em;color:var(--text2)}
+  .sec-head .bar{width:4px;height:15px;border-radius:2px}
+  .sec-count{margin-left:auto;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:2px 9px;font-size:10px;color:var(--text2)}
+  .signals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;padding-bottom:6px}
+  .card{border:1px solid var(--border);border-left-width:3px;border-radius:8px;padding:14px;background:var(--panel)}
+  .card.bull{border-left-color:var(--bull)}
+  .card.bear{border-left-color:var(--bear)}
+  .card-top{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .card-pair{font-size:16px;font-weight:700}
+  .tag{font-size:9px;letter-spacing:0.08em;padding:3px 8px;border-radius:4px;border:1px solid}
+  .tag.dir-bull{color:var(--bull);border-color:var(--bull)}
+  .tag.dir-bear{color:var(--bear);border-color:var(--bear)}
+  .tag.type{color:var(--warn);border-color:var(--warn)}
+  .tag.tf{color:var(--accent);border-color:var(--accent)}
+  .factors{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+  .factor{font-size:8px;letter-spacing:0.05em;padding:3px 7px;border-radius:3px;background:var(--panel2);border:1px solid var(--border2);color:var(--accent)}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+  .field-lbl{font-size:8px;letter-spacing:0.1em;color:var(--text3);margin-bottom:3px}
+  .field-val{font-size:12px;color:var(--text)}
+  .sltp{display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;flex-wrap:wrap}
+  .conf-row{display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:10px;border-top:1px solid var(--border)}
+  .conf-dots{display:flex;gap:3px;margin-left:auto}
+  .cdot{width:7px;height:7px;border-radius:50%;background:var(--border2)}
+  .cdot.on.bull{background:var(--bull);box-shadow:0 0 4px var(--bull)}
+  .cdot.on.bear{background:var(--bear);box-shadow:0 0 4px var(--bear)}
+  .armed-row,.watch-row,.hist-row{display:flex;align-items:center;gap:8px;padding:11px 13px;border:1px solid var(--border);border-radius:7px;margin-bottom:8px;background:var(--panel);font-size:11px;flex-wrap:wrap}
+  .armed-row{border-color:rgba(240,180,41,0.4)}
+  .pair-cell{font-weight:700;color:#fff;min-width:62px}
+  .mini{font-size:9px;letter-spacing:0.08em}
+  .sess-tag{font-size:8px;letter-spacing:0.08em;padding:1px 5px;border-radius:3px;border:1px solid}
+  .push-right{margin-left:auto}
+  .empty{border:1px dashed var(--border2);border-radius:8px;padding:34px 16px;text-align:center;color:var(--text3);font-size:11px;letter-spacing:0.1em}
+  .empty .sub{font-size:9px;margin-top:6px;color:var(--dim);animation:pulse 2s infinite}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+  @media(max-width:760px){.two-col{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-
-<!-- ── HEADER ─────────────────────────────────────── -->
-<header>
-  <div class="logo">
-    <div class="logo-icon"></div>
-    <div>
-      <div class="logo-text">SMC OB CONFLUENCE</div>
-      <div class="logo-sub" id="logoSub">4H ORDER BLOCK × 15M ALIGNMENT — AUTO ENGINE</div>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <div class="logo-mark"></div>
+      <div class="logo-txt">
+        <h1>SMC OB CONFLUENCE</h1>
+        <p id="logoSub">4H ORDER BLOCK × 15MIN ALIGNMENT — AUTO ENGINE</p>
+      </div>
     </div>
-  </div>
-  <div class="header-right">
-    <div class="conn-badge connected" id="connBadge">
-      <div class="conn-dot"></div>
-      <span id="connText">LIVE</span>
-    </div>
-    <div id="creditMeter" title="Twelve Data API credits used today"
-         style="font-size:10px;letter-spacing:0.08em;padding:3px 8px;border:1px solid var(--border2);border-radius:3px;color:var(--text2);white-space:nowrap">
-      ⛁ --/-- credits
-    </div>
-    <div id="clock">--:--:-- UTC</div>
-  </div>
-</header>
+    <div class="live"><span class="dot"></span>LIVE</div>
+    <div id="creditMeter" title="Twelve Data API credits used today">⛁ —/— credits</div>
+    <div id="clock">--:--:--</div>
+  </header>
 
-<!-- ── SESSIONS ───────────────────────────────────── -->
-<div class="session-bar">
-  <div class="session" id="ss-sydney"> <div class="session-dot"></div>SYDNEY</div>
-  <div class="session" id="ss-tokyo">  <div class="session-dot"></div>TOKYO</div>
-  <div class="session" id="ss-london"> <div class="session-dot"></div>LONDON</div>
-  <div class="session" id="ss-newyork"><div class="session-dot"></div>NEW YORK</div>
-  <div class="session" style="margin-left:auto;border:none" id="pollStatus">SCANNING...</div>
+  <div class="sessions">
+    <div class="session" id="sess-sydney"><span class="session-dot"></span>SYDNEY</div>
+    <div class="session" id="sess-tokyo"><span class="session-dot"></span>TOKYO</div>
+    <div class="session" id="sess-london"><span class="session-dot"></span>LONDON</div>
+    <div class="session" id="sess-ny"><span class="session-dot"></span>NEW YORK</div>
+    <div class="session" id="pollStatus">CONNECTING…</div>
+  </div>
+
+  <div class="scoreboard" id="scoreboard">
+    <div class="sb-item"><span class="sb-val" id="sb-wr" style="color:var(--warn)">—</span><span style="color:var(--text2)">WIN RATE</span></div>
+    <div class="sb-item" style="color:var(--bull)">✅ <span class="sb-val" id="sb-tp">0</span> TP</div>
+    <div class="sb-item" style="color:var(--bear)">❌ <span class="sb-val" id="sb-sl">0</span> SL</div>
+    <div class="sb-item" style="color:var(--text3)">⏳ <span class="sb-val" id="sb-open">0</span> open</div>
+    <div class="sb-item" style="color:var(--text3);font-size:9px">tracked outcomes · feed-based, indicative</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-tot">0</div><div class="stat-lbl">TOTAL SIGNALS</div></div>
+    <div class="stat"><div class="stat-val bull" id="s-bul">0</div><div class="stat-lbl">BULLISH HITS</div></div>
+    <div class="stat"><div class="stat-val bear" id="s-ber">0</div><div class="stat-lbl">BEARISH HITS</div></div>
+    <div class="stat"><div class="stat-val warn" id="s-arm">0</div><div class="stat-lbl">ARMED</div></div>
+    <div class="stat"><div class="stat-val acc" id="s-prs">0</div><div class="stat-lbl">PAIRS</div></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--bull)"></span>4H Bullish OB + 15m align ↑</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--bear)"></span>4H Bearish OB + 15m align ↓</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--warn)"></span>High confluence 3+</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /6</div>
+  </div>
+
+  <div class="two-col">
+    <section>
+      <div class="sec-head"><span class="bar" style="background:var(--bull)"></span>▲ BULLISH SETUPS<span class="sec-count" id="c-bull">0</span></div>
+      <div class="signals-grid" id="bullSignals"></div>
+    </section>
+    <section>
+      <div class="sec-head"><span class="bar" style="background:var(--bear)"></span>▼ BEARISH SETUPS<span class="sec-count" id="c-bear">0</span></div>
+      <div class="signals-grid" id="bearSignals"></div>
+    </section>
+  </div>
+
+  <section>
+    <div class="sec-head" style="color:var(--warn)"><span class="bar" style="background:var(--warn)"></span>⊙ ARMED — IN 4H OB, AWAITING 15M CONFIRM<span class="sec-count" id="c-armed">0</span></div>
+    <div id="armedList"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="bar" style="background:var(--accent)"></span>◎ APPROACHING OB — WATCHLIST<span class="sec-count" id="c-watch">0</span></div>
+    <div id="watchList"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="bar" style="background:var(--text3)"></span>⊛ HISTORY — 2+ CONFLUENCE (LAST 10)<span class="sec-count" id="c-hist">0</span></div>
+    <div id="histList"></div>
+  </section>
 </div>
-
-<!-- ── CONTROLS ───────────────────────────────────── -->
-<div class="controls">
-  <span class="ctrl-label">DIRECTION</span>
-  <div class="filter-group">
-    <button class="filter-btn active"  id="f-all"  onclick="setDir('all')">ALL</button>
-    <button class="filter-btn"         id="f-bull" onclick="setDir('bull')">BULLISH</button>
-    <button class="filter-btn"         id="f-bear" onclick="setDir('bear')">BEARISH</button>
-  </div>
-  <div class="sep"></div>
-  <span class="ctrl-label">OB TYPE</span>
-  <div class="filter-group">
-    <button class="filter-btn active" id="ob-both"     onclick="setOB('both')">BOTH</button>
-    <button class="filter-btn"        id="ob-swing"    onclick="setOB('swing')">SWING</button>
-    <button class="filter-btn"        id="ob-internal" onclick="setOB('internal')">INTERNAL</button>
-  </div>
-  <div class="sep"></div>
-  <span class="ctrl-label">CONFLUENCE</span>
-  <div class="filter-group">
-    <button class="filter-btn active" id="cf-0" onclick="setConf(0)">ANY</button>
-    <button class="filter-btn"        id="cf-2" onclick="setConf(2)">2+</button>
-    <button class="filter-btn"        id="cf-3" onclick="setConf(3)">3+</button>
-    <button class="filter-btn"        id="cf-4" onclick="setConf(4)">4+</button>
-  </div>
-  <div class="right-controls">
-    <span id="lastUpdateEl">—</span>
-    <button class="ctrl-btn" onclick="doFetch()">⟳ REFRESH</button>
-    <button class="ctrl-btn" id="scanBtn" onclick="doScanNow()">⚡ SCAN NOW</button>
-  </div>
-</div>
-
-<!-- ── STATS ──────────────────────────────────────── -->
-<div class="stats-bar">
-  <div class="stat"><div class="stat-val"     id="s-tot">0</div><div class="stat-lbl">TOTAL SIGNALS</div></div>
-  <div class="stat"><div class="stat-val bull" id="s-bul">0</div><div class="stat-lbl">BULLISH HITS</div></div>
-  <div class="stat"><div class="stat-val bear" id="s-ber">0</div><div class="stat-lbl">BEARISH HITS</div></div>
-  <div class="stat"><div class="stat-val warn" id="s-hcf">0</div><div class="stat-lbl">HIGH CONFLUENCE</div></div>
-  <div class="stat"><div class="stat-val acc"  id="s-prs">0</div><div class="stat-lbl">PAIRS</div></div>
-  <div class="stat" title="Auto-tracked: of closed signals, how many reached TP before SL (measured on the data feed — indicative only)">
-    <div class="stat-val" id="s-wr" style="color:var(--warn)">—</div>
-    <div class="stat-lbl">WIN RATE</div></div>
-</div>
-<div id="trackerBar" style="display:none;padding:6px 14px;font-size:10px;letter-spacing:0.05em;color:var(--text2);border-bottom:1px solid var(--border);background:var(--panel,#0d1117)">
-  <span style="color:var(--bull)">✅ <span id="tk-tp">0</span> TP</span>
-  &nbsp;·&nbsp;
-  <span style="color:var(--bear)">❌ <span id="tk-sl">0</span> SL</span>
-  &nbsp;·&nbsp;
-  <span style="color:var(--text3,#5a6877)">⏳ <span id="tk-open">0</span> open</span>
-  &nbsp;·&nbsp;
-  <span id="tk-note" style="color:var(--text3,#5a6877)">tracking signal outcomes (feed-based, indicative)</span>
-</div>
-
-<!-- ── LEGEND ─────────────────────────────────────── -->
-<div class="legend">
-  <div class="legend-item"><div class="legend-dot" style="background:var(--bull)"></div>4H Bullish OB + 15m align ↑</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--bear)"></div>4H Bearish OB + 15m align ↓</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div>High confluence 3+</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Dots = confluence score /6</div>
-</div>
-
-<!-- ── MAIN GRID ───────────────────────────────────── -->
-<!-- ── SCAN PROGRESS ── -->
-<div id="scanProgressWrap" style="display:none;padding:6px 24px;border-bottom:1px solid var(--border);background:rgba(59,130,246,0.05)">
-  <div style="display:flex;align-items:center;gap:10px">
-    <span id="scanProgressText" style="font-size:9px;color:var(--accent);letter-spacing:0.12em;white-space:nowrap">SCANNING...</span>
-    <div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
-      <div id="scanProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--bull));transition:width 0.4s ease"></div>
-    </div>
-    <span id="scanProgressPct" style="font-size:9px;color:var(--text2);white-space:nowrap">0%</span>
-  </div>
-</div>
-
-<main>
-  <div class="bull-col">
-    <div class="section-label">▲ BULLISH SETUPS <span class="count-pill" id="bc">0</span></div>
-    <div id="bull-col"></div>
-  </div>
-  <div class="bear-col">
-    <div class="section-label">▼ BEARISH SETUPS <span class="count-pill" id="rc">0</span></div>
-    <div id="bear-col"></div>
-  </div>
-</main>
-
-<!-- ── ARMED (in 4H OB, awaiting 15m confirm) ── -->
-<div style="padding:0 24px 24px">
-  <div class="section-label" style="margin-bottom:10px;color:var(--warn)">
-    ⊙ ARMED — IN 4H OB, AWAITING 15M CONFIRM <span class="count-pill" id="armedCount">0</span>
-  </div>
-  <div id="armedTable" style="border:1px solid rgba(245,176,66,0.3);border-radius:3px;overflow:hidden">
-    <div class="empty-col" style="border:none">NOTHING ARMED<div class="pulse-text">PRICE NOT IN ANY 4H OB YET...</div></div>
-  </div>
-</div>
-
-<!-- ── WATCHLIST ── -->
-<div style="padding:0 24px 24px">
-  <div class="section-label" style="margin-bottom:10px">
-    ◎ APPROACHING OB — WATCHLIST <span class="count-pill" id="watchCount">0</span>
-  </div>
-  <div id="watchTable" style="border:1px solid var(--border2);border-radius:3px;overflow:hidden">
-    <div class="empty-col" style="border:none">NO PAIRS APPROACHING<div class="pulse-text">SCANNING...</div></div>
-  </div>
-</div>
-
-<!-- ── HISTORY ── -->
-<div style="padding:0 24px 28px">
-  <div class="section-label" style="margin-bottom:10px">
-    ⏱ HISTORY — 2+ CONFLUENCE (LAST 10) <span class="count-pill" id="histCount">0</span>
-  </div>
-  <div id="histTable" style="border:1px solid var(--border2);border-radius:3px;overflow:hidden">
-    <div class="empty-col" style="border:none">NO HISTORY YET<div class="pulse-text">BUILDS UP AS THE ENGINE SCANS...</div></div>
-  </div>
-</div>
-
-<div id="tip"></div>
-<div id="toast"></div>
 
 <script>
-// ════════════════════════════════════════════════════
-// Since this page IS served from the Railway server,
-// all API calls use relative paths — no URL config needed
-// ════════════════════════════════════════════════════
-const API = '';   // same origin — /signals, /webhook, etc.
+const API = "";
 
-let signals    = [];
-let seenIds    = new Set();
-let dirF       = 'all';
-let obF        = 'both';
-let cfF        = 0;
-let toastTimer = null;
+function $(id){ return document.getElementById(id); }
+function safe(v, d){ return (v===undefined||v===null) ? (d===undefined?'':d) : v; }
+function digits(pair){
+  pair = String(pair||'');
+  if(pair.indexOf('JPY')>=0) return 3;
+  if(pair.indexOf('XAU')>=0) return 2;
+  return 5;
+}
+function fmt(pair,v){
+  if(v===undefined||v===null||isNaN(v)) return '—';
+  return Number(v).toFixed(digits(pair));
+}
+function setText(id,txt){ const e=$(id); if(e) e.textContent=txt; }
 
-// ── Fetch signals from server ────────────────────────
-async function doFetch() {
-  try {
-    const r = await fetch(API + '/signals');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
+function signalCard(x){
+  const bias = safe(x.bias,'bull');
+  const isBull = bias==='bull';
+  const arrow = isBull?'▲ LONG':'▼ SHORT';
+  const conf = Number(safe(x.confluence,1));
+  const factors = Array.isArray(x.factors)? x.factors : [];
+  const zone = fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh);
+  let dots='';
+  for(let i=1;i<=6;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
+  const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
+  const sl = (x.slPrice!=null)? fmt(x.pair,x.slPrice) : '—';
+  const tp = (x.tpPrice!=null)? fmt(x.pair,x.tpPrice) : '—';
+  const rr = (x.rr!=null)? Number(x.rr).toFixed(1) : '2.0';
+  const slPips = (x.slPips!=null)? ' ('+Number(x.slPips).toFixed(1)+'p)' : '';
+  const tpPips = (x.tpPips!=null)? ' ('+Number(x.tpPips).toFixed(1)+'p)' : '';
+  const struct = safe(x.m15struct, 'aligned');
+  const sess = safe(x.session,'');
+  const sc = sess==='NY'?'var(--bull)':sess==='London'?'var(--accent)':'var(--text3)';
+  const sessTag = sess ? '<span class="sess-tag" style="color:'+sc+';border-color:'+sc+'">'+sess+'</span>' : '';
+  return '<div class="card '+bias+'">'+
+    '<div class="card-top">'+
+      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+
+      '<span class="tag '+(isBull?'dir-bull':'dir-bear')+'">'+arrow+'</span>'+
+      '<span class="tag type">'+safe(x.obType,'Swing')+'</span>'+
+      '<span class="tag tf">'+safe(x.timeframe,'4H')+'</span>'+sessTag+
+    '</div>'+
+    '<div class="factors">'+factorChips+'</div>'+
+    '<div class="grid3">'+
+      '<div><div class="field-lbl">PRICE</div><div class="field-val">'+fmt(x.pair,x.price)+'</div></div>'+
+      '<div><div class="field-lbl">OB ZONE</div><div class="field-val">'+zone+'</div></div>'+
+      '<div><div class="field-lbl">15M STRUCT</div><div class="field-val" style="color:'+(isBull?'var(--bull)':'var(--bear)')+'">'+struct+'</div></div>'+
+    '</div>'+
+    '<div class="sltp">'+
+      '<div><span style="color:var(--bear)">SL '+sl+'</span><span style="color:var(--text3)">'+slPips+'</span></div>'+
+      '<div><span style="color:var(--bull)">TP '+tp+'</span><span style="color:var(--text3)">'+tpPips+'</span></div>'+
+      '<div style="margin-left:auto;color:var(--text3)">R:R '+rr+' · ref only</div>'+
+    '</div>'+
+    '<div class="conf-row">'+
+      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/6</span>'+
+      '<div class="conf-dots">'+dots+'</div>'+
+    '</div>'+
+  '</div>';
+}
 
-    // Detect genuinely new signals
-    const fresh = data.filter(s => {
-      const id = (s.pair || '') + '_' + (s.receivedAt || '');
-      return !seenIds.has(id);
-    });
-    data.forEach(s => seenIds.add((s.pair||'') + '_' + (s.receivedAt||'')));
-
-    if (fresh.length && signals.length > 0) {
-      fresh.forEach(s =>
-        toast(`⚡ ${s.pair} — ${s.bias==='bull'?'▲ BULLISH':'▼ BEARISH'} ${s.obType||''} OB`)
-      );
-    }
-
-    signals = data;
-    const now = new Date();
-    document.getElementById('lastUpdateEl').textContent =
-      pad(now.getUTCHours())+':'+pad(now.getUTCMinutes())+':'+pad(now.getUTCSeconds())+' UTC';
-    document.getElementById('pollStatus').textContent = 'LAST POLL: ' + pad(now.getUTCSeconds()) + 's';
-
-    setConn('connected','LIVE');
-    render();
-  } catch(e) {
-    setConn('disconnected','SERVER ERROR');
-    console.error(e);
+function armedRow(x){
+  const bias = safe(x.bias,'bull');
+  const isBull = bias==='bull';
+  const arrow = isBull?'▲ LONG':'▼ SHORT';
+  const dirColor = isBull?'var(--bull)':'var(--bear)';
+  const sess = safe(x.session,'');
+  const sc = sess==='NY'?'var(--bull)':sess==='London'?'var(--accent)':'var(--text3)';
+  const sessTag = sess?'<span class="sess-tag" style="color:'+sc+';border-color:'+sc+'">'+sess+'</span>':'';
+  let mit='';
+  if(x.currentlyIn) mit='<span class="mini" style="color:var(--text3)">IN ZONE</span>';
+  else if(x.barsSinceMit!=null) mit='<span class="mini" style="color:var(--warn)">TAPPED '+x.barsSinceMit+'b ago</span>';
+  let phase, phaseColor;
+  if(x.brState==='broken'){ phase='⚡ 15m BROKE — awaiting retest'; phaseColor='var(--accent)'; }
+  else { phase='⏳ '+safe(x.m15needed,'awaiting 15m break'); phaseColor='var(--warn)'; }
+  let ltfZone='';
+  if(x.brState==='broken' && x.ltfObLow!=null && x.ltfObHigh!=null){
+    ltfZone='<span class="mini" style="color:var(--text3)">15m OB '+fmt(x.pair,x.ltfObLow)+'–'+fmt(x.pair,x.ltfObHigh)+'</span>';
   }
+  return '<div class="armed-row">'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
+    sessTag+mit+ltfZone+
+    '<span class="push-right mini" style="color:'+phaseColor+'">'+phase+'</span>'+
+  '</div>';
 }
 
-// ── History (past 2+ confluence signals) ────────────
-async function fetchHistory() {
-  try {
-    const r = await fetch(API + '/history');
-    const h = await r.json();
-    renderHistory(h);
-  } catch(e) {}
+function watchRow(x){
+  const bias = safe(x.bias,'bull');
+  const isBull = bias==='bull';
+  const arrow = isBull?'▲ LONG':'▼ SHORT';
+  const dirColor = isBull?'var(--bull)':'var(--bear)';
+  const zone = fmt(x.pair,x.obLow)+'–'+fmt(x.pair,x.obHigh);
+  const dist = (x.distancePips!=null)? Number(x.distancePips).toFixed(1)+' pips' : '—';
+  return '<div class="watch-row">'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
+    '<span class="mini" style="color:var(--text2)">'+safe(x.obType,'Swing')+'</span>'+
+    '<span class="mini" style="color:var(--text3)">→ '+zone+'</span>'+
+    '<span class="push-right" style="color:var(--text)">'+fmt(x.pair,x.price)+'</span>'+
+    '<span class="mini" style="color:var(--text2);min-width:74px;text-align:right">'+dist+'</span>'+
+  '</div>';
 }
 
-function renderHistory(h) {
-  document.getElementById('histCount').textContent = h.length;
-  const el = document.getElementById('histTable');
-  if (!h.length) {
-    el.innerHTML = '<div class="empty-col" style="border:none">NO HISTORY YET<div class="pulse-text">BUILDS UP AS THE ENGINE SCANS...</div></div>';
-    return;
+function histRow(x){
+  const bias = safe(x.bias,'bull');
+  const isBull = bias==='bull';
+  const conf = Number(safe(x.confluence,0));
+  const t = safe(x.time,'');
+  const tt = t? String(t).replace('T',' ').slice(5,16) : '';
+  return '<div class="hist-row">'+
+    '<span class="mini" style="color:var(--text3);min-width:88px">'+tt+'</span>'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="mini" style="color:'+(isBull?'var(--bull)':'var(--bear)')+'">'+(isBull?'▲':'▼')+' '+safe(x.obType,'')+'</span>'+
+    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/6</span>'+
+  '</div>';
+}
+
+async function getJSON(path){
+  try{
+    const r = await fetch(API + path);
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }
+}
+
+async function loadSignals(){
+  const data = await getJSON('/signals');
+  if(!Array.isArray(data)) return;
+  const bulls = data.filter(function(x){return x.bias==='bull';});
+  const bears = data.filter(function(x){return x.bias==='bear';});
+  const bEl=$('bullSignals'), rEl=$('bearSignals');
+  if(bEl) bEl.innerHTML = bulls.length? bulls.map(signalCard).join('') : '<div class="empty">NO BULLISH SIGNALS<div class="sub">SCANNING FOR OB CONFLUENCE…</div></div>';
+  if(rEl) rEl.innerHTML = bears.length? bears.map(signalCard).join('') : '<div class="empty">NO BEARISH SIGNALS<div class="sub">SCANNING FOR OB CONFLUENCE…</div></div>';
+  setText('c-bull', bulls.length);
+  setText('c-bear', bears.length);
+  setText('s-tot', data.length);
+  setText('s-bul', bulls.length);
+  setText('s-ber', bears.length);
+}
+
+async function loadArmed(){
+  const data = await getJSON('/armed');
+  if(!Array.isArray(data)) return;
+  const el=$('armedList');
+  if(el) el.innerHTML = data.length? data.map(armedRow).join('') : '<div class="empty">NOTHING ARMED<div class="sub">PRICE NOT IN ANY 4H OB YET…</div></div>';
+  setText('c-armed', data.length);
+  setText('s-arm', data.length);
+}
+
+async function loadWatch(){
+  const data = await getJSON('/watchlist');
+  if(!Array.isArray(data)) return;
+  const el=$('watchList');
+  if(el) el.innerHTML = data.length? data.map(watchRow).join('') : '<div class="empty">NO PAIRS APPROACHING<div class="sub">SCANNING…</div></div>';
+  setText('c-watch', data.length);
+}
+
+async function loadHistory(){
+  const data = await getJSON('/history');
+  if(!Array.isArray(data)) return;
+  const el=$('histList');
+  if(el) el.innerHTML = data.length? data.slice(0,10).map(histRow).join('') : '<div class="empty">NO HISTORY YET</div>';
+  setText('c-hist', data.length);
+}
+
+function updateSessions(){
+  const h = new Date().getUTCHours();
+  const map = {
+    'sess-sydney': (h>=22||h<7),
+    'sess-tokyo':  (h>=0&&h<9),
+    'sess-london': (h>=8&&h<17),
+    'sess-ny':     (h>=13&&h<22)
+  };
+  for(const id in map){ const e=$(id); if(e) e.classList.toggle('active', map[id]); }
+}
+
+async function loadStatus(){
+  const s = await getJSON('/status');
+  if(!s){ const p=$('pollStatus'); if(p) p.textContent='OFFLINE'; return; }
+  const log = s.log || {};
+  const meter = $('creditMeter');
+  if(meter){
+    const limit = s.credit_limit || 800;
+    const used = (s.credits_used!=null)? s.credits_used : null;
+    const dropped = Array.isArray(log.dropped_pairs)? log.dropped_pairs : [];
+    if(dropped.length){
+      meter.style.color='var(--bear)'; meter.style.borderColor='var(--bear)';
+      meter.textContent = '⚠ dropped: '+dropped.join(', ')+' | ⛁ '+safe(used,'—')+'/'+limit;
+    } else if(used!=null){
+      const pct = used/limit;
+      meter.style.color = pct>=0.9?'var(--bear)':pct>=0.75?'var(--warn)':'var(--text2)';
+      meter.style.borderColor = pct>=0.75? meter.style.color : 'var(--border2)';
+      meter.textContent = '⛁ '+used+'/'+limit+' credits';
+    } else { meter.textContent = '⛁ —/— credits'; }
   }
-  const rows = h.map(x => {
-    const dirColor = x.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
-    const arrow = x.bias==='bull' ? '▲' : '▼';
-    const t = x.time ? x.time.slice(5,16).replace('T',' ') : '—';
-    const confColor = x.confluence>=3 ? 'var(--warn)' : 'var(--text)';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px">
-      <span style="color:var(--text2);font-size:9px;min-width:74px">${t}</span>
-      <span style="font-weight:600;color:#fff;min-width:60px">${x.pair}</span>
-      <span style="color:${dirColor};font-size:9px;letter-spacing:0.08em">${arrow}${x.bias==='bull'?'L':'S'}</span>
-      <span style="color:var(--text2);font-size:9px">${x.obType}</span>
-      <span style="margin-left:auto;color:${confColor};font-weight:600">${x.confluence}/6</span>
-    </div>`;
-  }).join('');
-  el.innerHTML = rows;
-}
-
-// ── Watchlist (pairs approaching an OB) ─────────────
-async function fetchWatchlist() {
-  try {
-    const r = await fetch(API + '/watchlist');
-    const w = await r.json();
-    renderWatch(w);
-  } catch(e) {}
-}
-
-function pipLabel(pair, pips) {
-  return pips != null ? pips.toFixed(1) + ' pips' : '—';
-}
-
-// ── Armed (in 4H OB, awaiting 15m confirmation) ──
-async function fetchArmed() {
-  try {
-    const r = await fetch(API + '/armed');
-    const a = await r.json();
-    renderArmed(a);
-  } catch(e) {}
-}
-
-function renderArmed(a) {
-  document.getElementById('armedCount').textContent = a.length;
-  const el = document.getElementById('armedTable');
-  if (!a.length) {
-    el.innerHTML = '<div class="empty-col" style="border:none">NOTHING ARMED<div class="pulse-text">PRICE NOT IN ANY 4H OB YET...</div></div>';
-    return;
+  const sub=$('logoSub');
+  if(sub && s.htf && s.ltf){ sub.textContent = String(s.htf).toUpperCase()+' ORDER BLOCK × '+String(s.ltf).toUpperCase()+' ALIGNMENT — AUTO ENGINE'; }
+  if(Array.isArray(s.pairs)) setText('s-prs', s.pairs.length);
+  const p=$('pollStatus');
+  if(p){
+    if(log.scanning){
+      const done=log.progress||0, tot=log.total_pairs||(Array.isArray(s.pairs)?s.pairs.length:0);
+      p.textContent = 'SCANNING '+done+'/'+tot + (log.current_pair? ' — '+log.current_pair : '');
+    } else { p.textContent = 'LIVE'; }
   }
-  const rows = a.map(x => {
-    const dirColor = x.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
-    const arrow = x.bias==='bull' ? '▲' : '▼';
-    const zone = (x.obLow!=null && x.obHigh!=null)
-      ? `${fmt(x.pair,x.obLow)}–${fmt(x.pair,x.obHigh)}` : '';
-    // session tag — NY highlighted (user trades NY hours), others dimmed
-    const sess = x.session || '';
-    let sessColor = 'var(--text3,#5a6877)';
-    if (sess === 'NY') sessColor = 'var(--bull)';
-    else if (sess === 'London') sessColor = 'var(--accent)';
-    const sessTag = sess ? `<span style="color:${sessColor};font-size:8px;letter-spacing:0.1em;border:1px solid ${sessColor};border-radius:2px;padding:1px 4px">${sess}</span>` : '';
-    // mitigation status: currently in zone vs tapped-and-wicked-out
-    const mitInfo = x.currentlyIn
-      ? '<span style="color:var(--text3,#5a6877);font-size:8px">IN ZONE</span>'
-      : (x.barsSinceMit!=null
-          ? `<span style="color:var(--warn);font-size:8px">TAPPED ${x.barsSinceMit}b ago</span>`
-          : '');
-    // break-and-retest progress: which phase the setup is in
-    let phase, phaseColor;
-    if (x.brState === 'broken') {
-      phase = '⚡ 15m BROKE — awaiting retest';
-      phaseColor = 'var(--accent)';
-    } else {
-      phase = '⏳ awaiting 15m break';
-      phaseColor = 'var(--warn)';
+  const tk = s.tracker || {};
+  const sb = $('scoreboard');
+  if(tk && tk.total>0){
+    if(sb) sb.classList.add('show');
+    setText('sb-tp', safe(tk.tp,0));
+    setText('sb-sl', safe(tk.sl,0));
+    setText('sb-open', safe(tk.open,0));
+    const wr=$('sb-wr');
+    if(wr){
+      if(tk.win_rate!=null){ wr.textContent = tk.win_rate+'%'; wr.style.color = tk.win_rate>=50?'var(--bull)':'var(--bear)'; }
+      else wr.textContent='—';
     }
-    const ltfZone = (x.brState==='broken' && x.ltfObLow!=null && x.ltfObHigh!=null)
-      ? `<span style="color:var(--text3,#5a6877);font-size:8px">15m OB ${fmt(x.pair,x.ltfObLow)}–${fmt(x.pair,x.ltfObHigh)}</span>` : '';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap">
-      <span style="font-weight:600;color:#fff;min-width:60px">${x.pair}</span>
-      <span style="color:${dirColor};font-size:9px;letter-spacing:0.1em">${arrow} ${x.bias==='bull'?'LONG':'SHORT'}</span>
-      ${sessTag}
-      ${mitInfo}
-      ${ltfZone}
-      <span style="margin-left:auto;color:${phaseColor};font-size:9px;letter-spacing:0.05em">${phase}</span>
-    </div>`;
-  }).join('');
-  el.innerHTML = rows;
+  } else if(sb){ sb.classList.remove('show'); }
 }
 
-function renderWatch(w) {
-  document.getElementById('watchCount').textContent = w.length;
-  const el = document.getElementById('watchTable');
-  if (!w.length) {
-    el.innerHTML = '<div class="empty-col" style="border:none">NO PAIRS APPROACHING<div class="pulse-text">SCANNING...</div></div>';
-    return;
-  }
-  // closeness coloring: <20 pips hot, <50 warm
-  const rows = w.map(x => {
-    const dirColor = x.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
-    const dist = x.distancePips;
-    let distColor = 'var(--text2)';
-    if (dist < 20) distColor = 'var(--warn)';
-    if (dist < 8)  distColor = x.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
-    const arrow = x.bias==='bull' ? '▲' : '▼';
-    const zone = (x.obLow!=null && x.obHigh!=null)
-      ? `${fmt(x.pair,x.obLow)}–${fmt(x.pair,x.obHigh)}` : '';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px">
-      <span style="font-weight:600;color:#fff;min-width:64px">${x.pair}</span>
-      <span style="color:${dirColor};font-size:9px;letter-spacing:0.1em">${arrow} ${x.bias==='bull'?'LONG':'SHORT'}</span>
-      <span style="color:var(--text2);font-size:10px">${x.obType}</span>
-      <span style="color:var(--text3,#5a6877);font-size:9px">→ ${zone}</span>
-      <span style="margin-left:auto;color:var(--text2);font-size:10px">${fmt(x.pair,x.price)}</span>
-      <span style="color:${distColor};font-weight:600;min-width:70px;text-align:right">${pipLabel(x.pair,dist)}</span>
-    </div>`;
-  }).join('');
-  el.innerHTML = rows;
+function updateClock(){
+  const d=new Date();
+  const c=$('clock');
+  if(c) c.textContent = d.toUTCString().slice(17,25)+' UTC';
 }
 
-// ── Trigger immediate scan ──────────────────────────
-async function doScanNow() {
-  toast('⚡ Scan started — watch the progress bar');
-  try { await fetch(API + '/scan-now'); } catch(e) {}
-  setTimeout(pollStatus, 800);  // start tracking progress quickly
+async function refreshAll(){
+  updateClock();
+  updateSessions();
+  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadWatch(), loadHistory() ]);
 }
 
-// ── Helpers ─────────────────────────────────────────
-function pad(n) { return String(n).padStart(2,'0'); }
-
-function fmt(pair, val) {
-  if (val == null || val === '' || val === undefined) return '—';
-  const v = parseFloat(val);
-  if (isNaN(v)) return String(val);
-  if ((pair||'').includes('JPY')) return v.toFixed(3);
-  if ((pair||'').includes('XAU')) return v.toFixed(2);
-  if ((pair||'').includes('XAG')) return v.toFixed(3);
-  return v.toFixed(5);
-}
-
-function depth(s) {
-  const hi = parseFloat(s.obHigh), lo = parseFloat(s.obLow), pr = parseFloat(s.price);
-  if (!hi || !lo || !pr || hi===lo) return {pct:50,lbl:'MID',cls:'dep-mid'};
-  const r = hi - lo;
-  const d = s.bias==='bull' ? (pr-lo)/r : (hi-pr)/r;
-  const p = Math.round(d*100);
-  if (p < 30) return {pct:p,lbl:'SHALLOW',cls:'dep-shallow'};
-  if (p < 70) return {pct:p,lbl:'MID',    cls:'dep-mid'};
-  return           {pct:p,lbl:'DEEP',   cls:'dep-deep'};
-}
-
-function conf(s) {
-  // Use server-computed confluence if present (out of 5)
-  if (typeof s.confluence === 'number') return s.confluence;
-  let sc = 1;
-  if (s.m15struct) sc++;
-  if (s.fvg)  sc++;
-  if (s.eqhl) sc++;
-  if (s.sweep) sc++;
-  return Math.min(sc, 5);
-}
-
-function ago(iso) {
-  if (!iso) return '—';
-  const d = Math.floor((Date.now()-new Date(iso))/1000);
-  if (d < 60)   return d+'s ago';
-  if (d < 3600) return Math.floor(d/60)+'m ago';
-  return Math.floor(d/3600)+'h ago';
-}
-
-function isFresh(iso) {
-  if (!iso) return false;
-  return (Date.now()-new Date(iso)) < 120000;
-}
-
-// ── Render ──────────────────────────────────────────
-function filtered() {
-  return signals.filter(s => {
-    if (dirF !== 'all' && s.bias !== dirF) return false;
-    if (obF  !== 'both') {
-      const t = (s.obType||'').toLowerCase();
-      if (t !== obF) return false;
-    }
-    if (conf(s) < cfF) return false;
-    return true;
-  });
-}
-
-function render() {
-  const all   = filtered();
-  const bulls = all.filter(s => s.bias==='bull');
-  const bears = all.filter(s => s.bias==='bear');
-  const hcf   = all.filter(s => conf(s)>=3);
-  const pairs = new Set(signals.map(s=>s.pair)).size;
-
-  document.getElementById('s-tot').textContent = all.length;
-  document.getElementById('s-bul').textContent = bulls.length;
-  document.getElementById('s-ber').textContent = bears.length;
-  document.getElementById('s-hcf').textContent = hcf.length;
-  document.getElementById('s-prs').textContent = pairs;
-  document.getElementById('bc').textContent    = bulls.length;
-  document.getElementById('rc').textContent    = bears.length;
-
-  document.getElementById('bull-col').innerHTML =
-    bulls.length ? bulls.map(card).join('') : emptyCol('BULLISH');
-  document.getElementById('bear-col').innerHTML =
-    bears.length ? bears.map(card).join('') : emptyCol('BEARISH');
-}
-
-function emptyCol(dir) {
-  return `<div class="empty-col">
-    NO ${dir} SIGNALS
-    <div class="pulse-text">SCANNING FOR OB CONFLUENCE...</div>
-  </div>`;
-}
-
-function card(s) {
-  const c   = conf(s);
-  const dep = depth(s);
-  const pct = Math.round((c/6)*100);
-  const fr  = isFresh(s.receivedAt);
-  const mc  = s.bias==='bull' ? 'var(--bull)' : 'var(--bear)';
-
-  const dots = [1,2,3,4,5,6].map(i =>
-    `<div class="dot ${i<=c?'on '+s.bias:''}"></div>`
-  ).join('');
-
-  // Safely encode data for tooltip
-  const enc = encodeURIComponent(JSON.stringify(s));
-
-  return `<div class="card ${s.bias} ${fr?'fresh':''}"
-    onmouseenter="showTip(event,'${enc}')" onmouseleave="hideTip()">
-    ${fr?'<div class="new-badge">NEW</div>':''}
-    <div class="card-top">
-      <span class="pair-name">${s.pair||'—'}</span>
-      <span class="dir-tag">${s.bias==='bull'?'▲ LONG':'▼ SHORT'}</span>
-      <span class="ob-tag">${(s.obType||'OB').toUpperCase()}</span>
-      <span class="tf-tag">${s.timeframe||'4H'}</span>
-    </div>
-    <div class="conf-track"><div class="conf-fill" style="width:${pct}%"></div></div>
-    ${s.factors && s.factors.length ? `<div style="padding:0 12px 8px;display:flex;gap:4px;flex-wrap:wrap">` + s.factors.map(f=>`<span style="font-size:8px;padding:1px 6px;border-radius:1px;background:rgba(59,130,246,0.12);color:var(--accent);border:1px solid rgba(59,130,246,0.25)">${f}</span>`).join('') + `</div>` : ''}
-    <div class="card-grid">
-      <div>
-        <div class="m-lbl">PRICE</div>
-        <div class="m-val" style="color:#fff">${fmt(s.pair,s.price)}</div>
-      </div>
-      <div>
-        <div class="m-lbl">OB ZONE</div>
-        <div class="m-val" style="color:var(--text2);font-size:10px;line-height:1.7">
-          ${fmt(s.pair,s.obHigh)}<br>${fmt(s.pair,s.obLow)}
-        </div>
-      </div>
-      <div>
-        <div class="m-lbl">15M STRUCT</div>
-        <div class="m-val" style="color:${mc}">${s.m15struct||'—'}</div>
-      </div>
-      <div>
-        <div class="m-lbl">DEPTH</div>
-        <div class="m-val"><span class="dep-badge ${dep.cls}">${dep.lbl} ${dep.pct}%</span></div>
-      </div>
-      <div>
-        <div class="m-lbl">ALERT</div>
-        <div class="m-val" style="font-size:10px;color:var(--text2)">${s.alert||'—'}</div>
-      </div>
-      <div>
-        <div class="m-lbl">RECEIVED</div>
-        <div class="m-val" style="font-size:10px;color:var(--text2)">${ago(s.receivedAt)}</div>
-      </div>
-    </div>
-    ${ (s.slPrice!=null && s.tpPrice!=null) ? `
-    <div style="display:flex;gap:18px;padding:8px 14px;border-top:1px solid var(--border);font-size:11px">
-      <span style="color:var(--bear)">SL ${fmt(s.pair,s.slPrice)} <span style="color:var(--text2);font-size:9px">(${s.slPips}p)</span></span>
-      <span style="color:var(--bull)">TP ${fmt(s.pair,s.tpPrice)} <span style="color:var(--text2);font-size:9px">(${s.tpPips}p)</span></span>
-      <span style="color:var(--text2);font-size:9px">R:R ${s.rr}</span>
-      <span style="margin-left:auto;color:var(--text3,#5a6877);font-size:8px;letter-spacing:0.05em">REFERENCE ONLY</span>
-    </div>` : '' }
-    <div class="card-foot">
-      <span style="color:${c>=3?'var(--warn)':'var(--dim)'}">CONF ${c}/6</span>
-      <div class="dots">${dots}</div>
-    </div>
-  </div>`;
-}
-
-// ── Tooltip ─────────────────────────────────────────
-function showTip(e, enc) {
-  const s  = JSON.parse(decodeURIComponent(enc));
-  const c  = conf(s);
-  const dep = depth(s);
-  const mc = s.bias==='bull'?'var(--bull)':'var(--bear)';
-
-  document.getElementById('tip').innerHTML = `
-    <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:10px;
-                border-bottom:1px solid var(--border);padding-bottom:8px">
-      ${s.pair} &mdash; ${s.bias==='bull'?'▲ BULLISH SETUP':'▼ BEARISH SETUP'}
-    </div>
-    <div class="tr"><span class="tl">Alert</span>    <span class="tv">${s.alert||'—'}</span></div>
-    <div class="tr"><span class="tl">OB Type</span>  <span class="tv">${s.obType||'—'}</span></div>
-    <div class="tr"><span class="tl">Timeframe</span><span class="tv">${s.timeframe||'4H'}</span></div>
-    <div class="tdiv"></div>
-    <div class="tr"><span class="tl">OB High</span>  <span class="tv">${fmt(s.pair,s.obHigh)}</span></div>
-    <div class="tr"><span class="tl">OB Low</span>   <span class="tv">${fmt(s.pair,s.obLow)}</span></div>
-    <div class="tr"><span class="tl">Entry Price</span><span class="tv" style="color:#fff">${fmt(s.pair,s.price)}</span></div>
-    <div class="tr"><span class="tl">OB Depth</span> <span class="tv">${dep.lbl} (${dep.pct}%)</span></div>
-    <div class="tdiv"></div>
-    <div class="tr"><span class="tl">15m Structure</span><span class="tv" style="color:${mc}">${s.m15struct||'—'}</span></div>
-    <div class="tr"><span class="tl">FVG Aligned</span>
-      <span class="tv" style="color:${s.fvg?'var(--bull)':'var(--dim)'}">${s.fvg?'YES':'NO'}</span></div>
-    <div class="tr"><span class="tl">EQH/EQL Near</span>
-      <span class="tv" style="color:${s.eqhl?'var(--bull)':'var(--dim)'}">${s.eqhl?'YES':'NO'}</span></div>
-    <div class="tr"><span class="tl">Liquidity Sweep</span>
-      <span class="tv" style="color:${s.sweep?'var(--warn)':'var(--dim)'}">${s.sweep?'YES':'NO'}</span></div>
-    <div class="tdiv"></div>
-    <div class="tr"><span class="tl">Confluence</span>
-      <span class="tv" style="color:${c>=3?'var(--warn)':'var(--text)'}">${c}/6</span></div>
-    <div class="tr"><span class="tl">Received</span> <span class="tv">${ago(s.receivedAt)}</span></div>
-  `;
-
-  const tip = document.getElementById('tip');
-  const x   = Math.min(e.clientX+14, window.innerWidth-285);
-  const y   = Math.min(e.clientY-10, window.innerHeight-360);
-  tip.style.left = x+'px'; tip.style.top = y+'px';
-  tip.classList.add('on');
-}
-function hideTip() { document.getElementById('tip').classList.remove('on'); }
-
-// ── Filters ─────────────────────────────────────────
-function setDir(v) {
-  dirF = v;
-  ['all','bull','bear'].forEach(x => document.getElementById('f-'+x).className='filter-btn');
-  const cls={all:'active',bull:'bull-active',bear:'bear-active'};
-  document.getElementById('f-'+v).classList.add(cls[v]);
-  render();
-}
-function setOB(v) {
-  obF = v;
-  ['both','swing','internal'].forEach(x => document.getElementById('ob-'+x).className='filter-btn');
-  document.getElementById('ob-'+v).classList.add('active');
-  render();
-}
-function setConf(n) {
-  cfF = n;
-  [0,2,3,4].forEach(x => document.getElementById('cf-'+x).className='filter-btn');
-  document.getElementById('cf-'+n).classList.add('active');
-  render();
-}
-
-// ── Connection badge ─────────────────────────────────
-function setConn(state, txt) {
-  const b = document.getElementById('connBadge');
-  b.className = 'conn-badge ' + state;
-  document.getElementById('connText').textContent = txt;
-}
-
-// ── Toast ────────────────────────────────────────────
-function toast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('on');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>t.classList.remove('on'), 3500);
-}
-
-// ── Clock & sessions ─────────────────────────────────
-function tick() {
-  const n = new Date();
-  document.getElementById('clock').textContent =
-    pad(n.getUTCHours())+':'+pad(n.getUTCMinutes())+':'+pad(n.getUTCSeconds())+' UTC';
-
-  const h = n.getUTCHours();
-  const sess = {sydney:[21,6],tokyo:[0,9],london:[7,16],newyork:[12,21]};
-  Object.entries(sess).forEach(([id,[st,en]])=>{
-    const on = st<en ? (h>=st&&h<en) : (h>=st||h<en);
-    document.getElementById('ss-'+id).classList.toggle('active',on);
-  });
-}
-
-// ── Start ────────────────────────────────────────────
-tick();
-setInterval(tick, 1000);
-doFetch();
-fetchWatchlist();
-fetchArmed();
-fetchHistory();
-setInterval(()=>{ doFetch(); fetchWatchlist(); fetchArmed(); fetchHistory(); }, 5000);
-pollStatus();
-render();
-
-let statusTimer = null;
-async function pollStatus() {
-  try {
-    const r = await fetch(API + '/status');
-    const s = await r.json();
-    const log = s.log || {};
-
-    // ── credit meter (in scope of s) ──
-    const meter = document.getElementById('creditMeter');
-    if (meter && s.credits_used != null) {
-      const limit = s.credit_limit || 800;
-      const pctUsed = s.credits_used / limit;
-      let color = 'var(--text2)';
-      if (pctUsed >= 0.75) color = 'var(--warn)';
-      if (pctUsed >= 0.90) color = 'var(--bear)';
-      meter.style.color = color;
-      meter.style.borderColor = pctUsed >= 0.75 ? color : 'var(--border2)';
-      // show dropped pairs (e.g. gold failing to fetch) so issues are visible
-      const dropped = (s.log && s.log.dropped_pairs) ? s.log.dropped_pairs : [];
-      if (dropped.length) {
-        meter.style.color = 'var(--bear)';
-        meter.style.borderColor = 'var(--bear)';
-        meter.textContent = `⚠ dropped: ${dropped.join(', ')}  |  ⛁ ${s.credits_used}/${limit}`;
-        meter.title = 'These pairs failed to fetch this scan (no data). Confirm them on your own chart.';
-      } else {
-        meter.textContent = `⛁ ${s.credits_used}/${limit} credits`;
-        meter.title = 'Twelve Data API credits used today';
-      }
-    }
-
-    // ── auto-tracker scoreboard ──
-    const tk = s.tracker || {};
-    const bar = document.getElementById('trackerBar');
-    const wrEl = document.getElementById('s-wr');
-    if (tk.total) {
-      document.getElementById('tk-tp').textContent = tk.tp || 0;
-      document.getElementById('tk-sl').textContent = tk.sl || 0;
-      document.getElementById('tk-open').textContent = tk.open || 0;
-      if (bar) bar.style.display = 'block';
-      if (wrEl) {
-        if (tk.win_rate != null) {
-          wrEl.textContent = tk.win_rate + '%';
-          wrEl.style.color = tk.win_rate >= 50 ? 'var(--bull)' : 'var(--bear)';
-        } else {
-          wrEl.textContent = '—';
-        }
-      }
-    }
-
-    // ── reflect active timeframes in the subtitle ──
-    const sub = document.getElementById('logoSub');
-    if (sub && s.htf && s.ltf) {
-      sub.textContent = `${s.htf.toUpperCase()} ORDER BLOCK × ${s.ltf.toUpperCase()} ALIGNMENT — AUTO ENGINE`;
-    }
-
-    const wrap = document.getElementById('scanProgressWrap');
-    const bar  = document.getElementById('scanProgressBar');
-    const pct  = document.getElementById('scanProgressPct');
-    const ptxt = document.getElementById('scanProgressText');
-
-    if (log.scanning) {
-      // show progress bar, poll fast
-      const done = log.progress || 0;
-      const tot  = log.total_pairs || (s.pairs ? s.pairs.length : 1);
-      const percent = Math.round((done/tot)*100);
-      wrap.style.display = 'block';
-      bar.style.width = percent + '%';
-      pct.textContent = percent + '%';
-      ptxt.textContent = `SCANNING ${done}/${tot}` + (log.current_pair ? ` — ${log.current_pair}` : '');
-      document.getElementById('pollStatus').textContent = `SCANNING ${done}/${tot} PAIRS`;
-      schedulePoll(1500);   // poll every 1.5s while scanning
-    } else {
-      // hide progress bar, poll slow
-      wrap.style.display = 'none';
-      let txt = `SCAN: ${s.pairs ? s.pairs.length : 0} pairs`;
-      if (log.last_scan) {
-        const ago = Math.floor((Date.now() - new Date(log.last_scan))/1000);
-        txt += ` | ${ago}s ago | ${log.credits_used_today||0} credits`;
-      }
-      if (log.last_error) txt += ` | WARN ${log.last_error.slice(0,40)}`;
-      document.getElementById('pollStatus').textContent = txt;
-      schedulePoll(15000);  // poll every 15s when idle
-    }
-  } catch(e) { schedulePoll(15000); }
-}
-
-function schedulePoll(ms) {
-  clearTimeout(statusTimer);
-  statusTimer = setTimeout(pollStatus, ms);
-}
+refreshAll();
+setInterval(refreshAll, 15000);
+setInterval(updateClock, 1000);
 </script>
 </body>
 </html>
