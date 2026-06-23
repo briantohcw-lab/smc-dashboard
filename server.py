@@ -367,6 +367,12 @@ def scan_once():
             if tr['outcome'] != 'open':
                 continue
             hl = latest_hl.get(tr['pair'])
+            # store the latest price on the position so the dashboard can show
+            # how close it is to TP/SL (best-effort; may be missing if a pair
+            # dropped this scan)
+            lp = latest_prices.get(tr['pair'])
+            if lp is not None:
+                tr['current'] = lp
             if not hl:
                 continue
             hi, lo = hl
