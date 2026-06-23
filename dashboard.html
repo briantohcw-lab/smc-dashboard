@@ -152,6 +152,11 @@
   </section>
 
   <section>
+    <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>◈ OPEN TRADES — TRACKED<span class="sec-count" id="c-open">0</span></div>
+    <div id="openList"></div>
+  </section>
+
+  <section>
     <div class="sec-head"><span class="bar" style="background:var(--accent)"></span>◎ APPROACHING OB — WATCHLIST<span class="sec-count" id="c-watch">0</span></div>
     <div id="watchList"></div>
   </section>
@@ -266,6 +271,37 @@ function watchRow(x){
   '</div>';
 }
 
+function openRow(x){
+  const bias = safe(x.bias,'bull');
+  const isLong = bias==='bull';
+  const arrow = isLong?'▲ LONG':'▼ SHORT';
+  const dirColor = isLong?'var(--bull)':'var(--bear)';
+  const entry = x.entry, sl = x.sl, tp = x.tp, cur = x.current;
+  const conf = Number(safe(x.confluence,0));
+
+  // progress toward TP: 0% at entry, 100% at TP, negative if moving toward SL
+  let prog = null, progColor = 'var(--text3)', progTxt = 'tracking…';
+  if(entry!=null && tp!=null && cur!=null && tp!==entry){
+    prog = (cur - entry) / (tp - entry);   // works for both long/short by sign
+    const pct = Math.max(-100, Math.min(100, Math.round(prog*100)));
+    if(pct >= 0){ progColor='var(--bull)'; progTxt = pct+'% to TP'; }
+    else { progColor='var(--bear)'; progTxt = Math.abs(pct)+'% to SL'; }
+  }
+
+  const t = safe(x.openedAt,'');
+  const tt = t? String(t).replace('T',' ').slice(5,16) : '';
+
+  return '<div class="watch-row" style="border-color:rgba(88,166,255,0.3)">'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
+    '<span class="mini" style="color:var(--text2)">@ '+fmt(x.pair,entry)+'</span>'+
+    '<span class="mini" style="color:var(--bear)">SL '+fmt(x.pair,sl)+'</span>'+
+    '<span class="mini" style="color:var(--bull)">TP '+fmt(x.pair,tp)+'</span>'+
+    (cur!=null?'<span class="mini" style="color:var(--text)">now '+fmt(x.pair,cur)+'</span>':'')+
+    '<span class="push-right mini" style="color:'+progColor+'">'+progTxt+'</span>'+
+  '</div>';
+}
+
 function histRow(x){
   const bias = safe(x.bias,'bull');
   const isBull = bias==='bull';
@@ -318,6 +354,17 @@ async function loadWatch(){
   const el=$('watchList');
   if(el) el.innerHTML = data.length? data.map(watchRow).join('') : '<div class="empty">NO PAIRS APPROACHING<div class="sub">SCANNING…</div></div>';
   setText('c-watch', data.length);
+}
+
+async function loadTracker(){
+  const data = await getJSON('/tracker');
+  if(!data) return;
+  const positions = Array.isArray(data.positions)? data.positions : [];
+  const open = positions.filter(function(p){return p.outcome==='open';});
+  const el=$('openList');
+  if(el) el.innerHTML = open.length? open.map(openRow).join('')
+      : '<div class="empty">NO OPEN TRADES<div class="sub">TRACKER ARMS WHEN A SIGNAL FIRES…</div></div>';
+  setText('c-open', open.length);
 }
 
 async function loadHistory(){
@@ -392,7 +439,7 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadWatch(), loadHistory() ]);
+  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory() ]);
 }
 
 refreshAll();
