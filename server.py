@@ -19,6 +19,10 @@ from datetime import datetime, timezone
 import os, time, threading, urllib.request, urllib.parse, urllib.error, json
 
 from smc_engine import SMCEngine, Candle, BULLISH, BEARISH
+try:
+    import ai_analysis
+except Exception:
+    ai_analysis = None
 
 
 
@@ -212,6 +216,7 @@ def scan_once():
               [p for p in PAIRS if p not in priority]
 
     dropped = []
+    candle_cache = {}   # pair(clean) -> (c4, c15) for post-scan AI analysis
     for idx, symbol in enumerate(ordered):
         scan_log['current_pair'] = symbol
         c4 = fetch_candles(symbol, HTF_TF, HTF_BARS)
@@ -226,6 +231,7 @@ def scan_once():
             scan_log['dropped_pairs'] = dropped
             continue
         scanned += 1
+        candle_cache[symbol.replace('/', '')] = (c4, c15)
 
         res = engine.analyze(symbol, c4, c15)
         if res is None:
@@ -301,6 +307,28 @@ def scan_once():
     # sort watchlist by closest first, keep top 12
     watch.sort(key=lambda w: w['distancePips'])
     watch_top = watch[:12]
+
+    # ── AI SETUP-QUALITY ANALYSIS (honest risk-flagger) ──
+    # Runs only on ARMED setups + signals (the few that matter), not all pairs.
+    # Each call is an Anthropic API request; skipped gracefully if no API key.
+    # Purpose: describe structure quality + risks to help SKIP weak setups.
+    # It does NOT predict, recommend, or score probability of success.
+    if ai_analysis is not None and getattr(ai_analysis, 'AI_ENABLED', False):
+        for entry in (new_signals + new_armed):
+            cc = candle_cache.get(entry.get('pair'))
+            if not cc:
+                continue
+            c4c, c15c = cc
+            try:
+                result = ai_analysis.analyze_setup(entry, c4c, c15c)
+                if result.get('ok'):
+                    entry['ai'] = {
+                        'label': result.get('label', ''),
+                        'note':  result.get('note', ''),
+                        'flags': result.get('flags', []),
+                    }
+            except Exception:
+                pass   # never let AI break the scan
 
     with _lock:
         signals.clear()
