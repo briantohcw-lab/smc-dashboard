@@ -86,7 +86,15 @@
   .empty{border:1px dashed var(--border2);border-radius:8px;padding:34px 16px;text-align:center;color:var(--text3);font-size:11px;letter-spacing:0.1em}
   .empty .sub{font-size:9px;margin-top:6px;color:var(--dim);animation:pulse 2s infinite}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
-  @media(max-width:760px){.two-col{grid-template-columns:1fr}}
+  .ai-block{margin-top:12px;padding:10px;border-radius:6px;background:rgba(88,166,255,0.06);border:1px solid rgba(88,166,255,0.2)}
+  .ai-head{display:flex;align-items:center;gap:8px;font-size:9px;letter-spacing:0.1em;color:var(--accent);margin-bottom:6px}
+  .ai-label{margin-left:auto;font-size:9px;letter-spacing:0.04em;padding:2px 7px;border-radius:4px;background:rgba(240,180,41,0.12);border:1px solid var(--warn);color:var(--warn)}
+  .ai-note{font-size:11px;line-height:1.5;color:var(--text);margin-bottom:6px}
+  .ai-flags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+  .ai-flag{font-size:8px;letter-spacing:0.03em;padding:2px 6px;border-radius:3px;background:rgba(255,93,108,0.1);border:1px solid rgba(255,93,108,0.35);color:var(--bear)}
+  .ai-disclaimer{font-size:8px;letter-spacing:0.05em;color:var(--text3);font-style:italic}
+  .ai-row-label{color:var(--accent);letter-spacing:0.04em}
+  .ai-row-note{color:var(--text2)}
 </style>
 </head>
 <body>
@@ -225,6 +233,7 @@ function signalCard(x){
       '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/6</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
+    aiBlock(x)+
   '</div>';
 }
 
@@ -246,11 +255,17 @@ function armedRow(x){
   if(x.brState==='broken' && x.ltfObLow!=null && x.ltfObHigh!=null){
     ltfZone='<span class="mini" style="color:var(--text3)">15m OB '+fmt(x.pair,x.ltfObLow)+'–'+fmt(x.pair,x.ltfObHigh)+'</span>';
   }
-  return '<div class="armed-row">'+
+  // compact AI quality label (full read shows on signal cards)
+  let aiTag='';
+  if(x.ai && x.ai.label){
+    aiTag='<span class="mini ai-row-label">◆ '+x.ai.label+'</span>';
+  }
+  return '<div class="armed-row" style="flex-wrap:wrap">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
     sessTag+mit+ltfZone+
     '<span class="push-right mini" style="color:'+phaseColor+'">'+phase+'</span>'+
+    (aiTag?'<div style="flex-basis:100%;margin-top:6px">'+aiTag+(x.ai.note?'<span class="mini ai-row-note"> — '+x.ai.note+'</span>':'')+'</div>':'')+
   '</div>';
 }
 
@@ -299,6 +314,23 @@ function openRow(x){
     '<span class="mini" style="color:var(--bull)">TP '+fmt(x.pair,tp)+'</span>'+
     (cur!=null?'<span class="mini" style="color:var(--text)">now '+fmt(x.pair,cur)+'</span>':'')+
     '<span class="push-right mini" style="color:'+progColor+'">'+progTxt+'</span>'+
+  '</div>';
+}
+
+function aiBlock(x){
+  const ai = x.ai;
+  if(!ai || (!ai.note && !ai.label)) return '';
+  const flags = Array.isArray(ai.flags)? ai.flags : [];
+  const flagChips = flags.map(function(f){
+    return '<span class="ai-flag">⚠ '+f+'</span>';
+  }).join('');
+  return '<div class="ai-block">'+
+    '<div class="ai-head">◆ AI QUALITY READ'+
+      (ai.label?'<span class="ai-label">'+ai.label+'</span>':'')+
+    '</div>'+
+    (ai.note?'<div class="ai-note">'+ai.note+'</div>':'')+
+    (flagChips?'<div class="ai-flags">'+flagChips+'</div>':'')+
+    '<div class="ai-disclaimer">descriptive only · not a prediction or trade call</div>'+
   '</div>';
 }
 
