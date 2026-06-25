@@ -108,12 +108,17 @@ class SMCEngine:
                  atr_period: int = 200, ob_filter_mult: float = 2.0,
                  swing_only: bool = True, default_rr: float = 2.0,
                  swing_max_age: int = 500, internal_max_age: int = 120,
-                 mitigation_window: int = 20):
+                 mitigation_window: int = 20,
+                 first_tap_only: bool = True):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
         self.ob_filter_mult = ob_filter_mult
         self.default_rr = default_rr   # R:R used for the reference TP level
+        # first_tap_only: only arm on the FIRST tap of a 4H OB. Later taps of an
+        # already-mitigated zone are skipped (lower-quality re-entries). Set
+        # False to arm on every tap.
+        self.first_tap_only = first_tap_only
         # swing_only: only use 4H SWING order blocks for signals & watchlist.
         # Internal OBs are noisy and produce zones not shown on the chart,
         # which caused phantom signals (e.g. NZDCAD, USDCHF). Default True.
@@ -601,6 +606,25 @@ class SMCEngine:
                     mit_bars_since = bars_since
                     mit_session = self._session_for(mit_time) if mit_time else None
 
+        # ── FIRST-TAP-ONLY FILTER ──
+        # Only arm on the FIRST tap of an OB. If price has already tapped this
+        # zone on a prior occasion (left and came back), the OB is mitigated /
+        # consumed and later taps are lower quality — skip arming.
+        # A single continuous stay in the zone = 1 tap (still armable).
+        if hit_ob is not None and candles_15m and self.first_tap_only:
+            tap_count, _in_now = self._count_ob_taps(
+                hit_ob, candles_15m, max_lookback=self.swing_max_age)
+            result_taps = tap_count
+            if tap_count > 1:
+                # zone already mitigated by an earlier tap → don't arm
+                hit_ob = None
+                hit_type = None
+                currently_in = False
+                mit_bars_since = None
+                mit_session = None
+        else:
+            result_taps = 0
+
         result = SMCResult(
             pair=pair,
             price=price,
@@ -872,6 +896,38 @@ class SMCEngine:
                         return {'state': state, 'ob_high': ob_high,
                                 'ob_low': ob_low, 'break_idx': base + break_idx}
         return {'state': 'none'}
+
+    def _count_ob_taps(self, ob, candles_15m, max_lookback=500):
+        """
+        Count how many DISTINCT times price has tapped (entered) this OB over its
+        recent history, and whether the most recent tap is still active.
+
+        A 'tap' is a contiguous run of 15m candles that touch the zone. Price
+        leaving the zone and returning later counts as a SEPARATE tap. This lets
+        us enforce 'first tap only' arming: the first return to an unmitigated OB
+        is the high-probability reaction; once tapped, the zone is mitigated and
+        later taps are lower quality.
+
+        Returns (tap_count, in_zone_now).
+          tap_count   = number of distinct taps seen in the lookback window
+          in_zone_now = is the most recent candle inside the zone
+        """
+        n = len(candles_15m)
+        if n == 0:
+            return 0, False
+        start = max(0, n - max_lookback)
+        taps = 0
+        prev_in = False
+        in_now = False
+        for i in range(start, n):
+            c = candles_15m[i]
+            inside = (c.high >= ob.low and c.low <= ob.high)
+            if inside and not prev_in:
+                taps += 1          # a new tap begins on the transition out->in
+            prev_in = inside
+            if i == n - 1:
+                in_now = inside
+        return taps, in_now
 
     def _recent_mitigation(self, ob, candles_15m, window_bars=20):
         """
