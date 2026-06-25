@@ -57,7 +57,11 @@ LTF_TF = os.environ.get('LTF_TF', '15min').strip()
 # Options: 'UTC', 'America/New_York', or any IANA timezone name.
 CANDLE_TZ = os.environ.get('CANDLE_TZ', 'America/New_York').strip()
 
-engine = SMCEngine(swing_length=50, internal_length=5)
+# first_tap_only: only arm on the FIRST tap of a 4H OB (skip already-mitigated
+# zones that price has tapped before). Set env FIRST_TAP_ONLY=0 to disable.
+FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '1').strip() not in ('0', 'false', 'False')
+
+engine = SMCEngine(swing_length=50, internal_length=5, first_tap_only=FIRST_TAP_ONLY)
 
 # ── Shared state ──
 signals = []          # current live signals shown on dashboard
