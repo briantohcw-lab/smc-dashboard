@@ -140,7 +140,7 @@
     <div class="legend-item"><span class="legend-dot" style="background:var(--bull)"></span>4H Bullish OB + 15m align ↑</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--bear)"></span>4H Bearish OB + 15m align ↓</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--warn)"></span>High confluence 3+</div>
-    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /6</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /7</div>
   </div>
 
   <div class="two-col">
@@ -200,7 +200,7 @@ function signalCard(x){
   const factors = Array.isArray(x.factors)? x.factors : [];
   const zone = fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh);
   let dots='';
-  for(let i=1;i<=6;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
+  for(let i=1;i<=7;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
   const sl = (x.slPrice!=null)? fmt(x.pair,x.slPrice) : '—';
   const tp = (x.tpPrice!=null)? fmt(x.pair,x.tpPrice) : '—';
@@ -230,7 +230,7 @@ function signalCard(x){
       '<div style="margin-left:auto;color:var(--text3)">R:R '+rr+' · ref only</div>'+
     '</div>'+
     '<div class="conf-row">'+
-      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/6</span>'+
+      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/7</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
     aiBlock(x)+
@@ -344,7 +344,7 @@ function histRow(x){
     '<span class="mini" style="color:var(--text3);min-width:88px">'+tt+'</span>'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+(isBull?'var(--bull)':'var(--bear)')+'">'+(isBull?'▲':'▼')+' '+safe(x.obType,'')+'</span>'+
-    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/6</span>'+
+    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/7</span>'+
   '</div>';
 }
 
