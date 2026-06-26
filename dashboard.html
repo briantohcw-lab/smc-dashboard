@@ -95,6 +95,37 @@
   .ai-disclaimer{font-size:8px;letter-spacing:0.05em;color:var(--text3);font-style:italic}
   .ai-row-label{color:var(--accent);letter-spacing:0.04em}
   .ai-row-note{color:var(--text2)}
+
+  /* interactivity */
+  .clickable{cursor:pointer;transition:background 0.12s,border-color 0.12s}
+  .clickable:hover{background:var(--panel2);border-color:var(--border2)}
+  .tv-btn{display:inline-flex;align-items:center;gap:4px;font-size:9px;letter-spacing:0.05em;
+    padding:3px 8px;border-radius:4px;border:1px solid var(--border2);color:var(--accent);
+    background:transparent;cursor:pointer;text-decoration:none;white-space:nowrap}
+  .tv-btn:hover{border-color:var(--accent);background:rgba(88,166,255,0.08)}
+  .expand-detail{margin-top:10px;padding:12px;border-radius:6px;background:var(--panel2);
+    border:1px solid var(--border);display:none}
+  .expand-detail.show{display:block}
+  .det-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:8px}
+  .det-item .l{font-size:8px;letter-spacing:0.1em;color:var(--text3);margin-bottom:2px}
+  .det-item .v{font-size:12px;color:var(--text)}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .ctrl-group{display:flex;gap:4px;align-items:center}
+  .ctrl-lbl{font-size:9px;letter-spacing:0.1em;color:var(--text3);margin-right:4px}
+  .ctrl-btn{font-size:10px;letter-spacing:0.04em;padding:5px 11px;border-radius:5px;
+    border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer}
+  .ctrl-btn:hover{border-color:var(--accent);color:var(--text)}
+  .ctrl-btn.active{background:var(--accent);color:#04111f;border-color:var(--accent);font-weight:700}
+  .alert-toast{position:fixed;top:16px;right:16px;z-index:999;max-width:340px;
+    padding:12px 16px;border-radius:8px;background:var(--panel);border:1px solid var(--bull);
+    border-left-width:4px;box-shadow:0 8px 28px rgba(0,0,0,0.5);font-size:12px;
+    transform:translateX(400px);transition:transform 0.35s ease;cursor:pointer}
+  .alert-toast.show{transform:translateX(0)}
+  .alert-toast .t{font-weight:700;color:var(--bull);margin-bottom:3px;letter-spacing:0.05em}
+  .alert-toast.bear{border-color:var(--bear)} .alert-toast.bear .t{color:var(--bear)}
+  .sound-toggle{margin-left:auto;font-size:9px;letter-spacing:0.08em;color:var(--text3);
+    cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none}
 </style>
 </head>
 <body>
@@ -143,6 +174,29 @@
     <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /7</div>
   </div>
 
+  <div class="controls">
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">DIR</span>
+      <button class="ctrl-btn active" data-filter="dir" data-val="all">ALL</button>
+      <button class="ctrl-btn" data-filter="dir" data-val="bull">▲ LONG</button>
+      <button class="ctrl-btn" data-filter="dir" data-val="bear">▼ SHORT</button>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">CONF</span>
+      <button class="ctrl-btn active" data-filter="conf" data-val="0">ANY</button>
+      <button class="ctrl-btn" data-filter="conf" data-val="2">2+</button>
+      <button class="ctrl-btn" data-filter="conf" data-val="3">3+</button>
+      <button class="ctrl-btn" data-filter="conf" data-val="4">4+</button>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">SORT</span>
+      <button class="ctrl-btn active" data-sort="conf">CONFLUENCE</button>
+      <button class="ctrl-btn" data-sort="dist">DISTANCE</button>
+      <button class="ctrl-btn" data-sort="pair">PAIR</button>
+    </div>
+    <div class="sound-toggle" id="soundToggle">🔔 <span id="soundState">SIGNAL ALERTS: ON</span></div>
+  </div>
+
   <div class="two-col">
     <section>
       <div class="sec-head"><span class="bar" style="background:var(--bull)"></span>▲ BULLISH SETUPS<span class="sec-count" id="c-bull">0</span></div>
@@ -178,6 +232,12 @@
 <script>
 const API = "";
 
+// ---- interactive state ----
+const filters = { dir: 'all', conf: 0 };
+let sortBy = 'conf';
+let soundOn = true;
+let knownSignalIds = null;   // null = first load (don't alert on initial)
+
 function $(id){ return document.getElementById(id); }
 function safe(v, d){ return (v===undefined||v===null) ? (d===undefined?'':d) : v; }
 function digits(pair){
@@ -191,6 +251,66 @@ function fmt(pair,v){
   return Number(v).toFixed(digits(pair));
 }
 function setText(id,txt){ const e=$(id); if(e) e.textContent=txt; }
+
+// ---- TradingView deep link ----
+function tvLink(pair){
+  const p = String(pair||'').replace('/','');
+  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent((p.indexOf('XAU')>=0?'OANDA:':'FX:')+p);
+}
+function tvButton(pair){
+  return '<a class="tv-btn" href="'+tvLink(pair)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">📈 TV</a>';
+}
+
+// ---- filter + sort applied to a list of entries ----
+function applyFilters(list){
+  if(!Array.isArray(list)) return [];
+  let out = list.filter(function(x){
+    if(filters.dir !== 'all' && x.bias !== filters.dir) return false;
+    if(filters.conf > 0 && Number(x.confluence||0) < filters.conf) return false;
+    return true;
+  });
+  out.sort(function(a,b){
+    if(sortBy==='conf') return Number(b.confluence||0)-Number(a.confluence||0);
+    if(sortBy==='dist') return Number(a.distancePips!=null?a.distancePips:9e9)-Number(b.distancePips!=null?b.distancePips:9e9);
+    if(sortBy==='pair') return String(a.pair||'').localeCompare(String(b.pair||''));
+    return 0;
+  });
+  return out;
+}
+
+// ---- expandable detail panel (built from any entry) ----
+function detailPanel(x){
+  const rows = [];
+  function add(l,v){ if(v!==undefined && v!==null && v!=='') rows.push('<div class="det-item"><div class="l">'+l+'</div><div class="v">'+v+'</div></div>'); }
+  add('PRICE', fmt(x.pair,x.price));
+  add('4H OB ZONE', (x.obLow!=null?fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh):null));
+  add('DISTANCE', (x.distancePips!=null? Number(x.distancePips).toFixed(1)+' pips':null));
+  add('15M STRUCT', x.m15struct);
+  add('15M OB', (x.ltfObLow!=null?fmt(x.pair,x.ltfObLow)+' – '+fmt(x.pair,x.ltfObHigh):null));
+  add('S/R CHANNEL', (x.srHi!=null?fmt(x.pair,x.srLo)+' – '+fmt(x.pair,x.srHi):null));
+  add('SL', (x.slPrice!=null?fmt(x.pair,x.slPrice):null));
+  add('TP', (x.tpPrice!=null?fmt(x.pair,x.tpPrice)+(x.rr!=null?'  ('+Number(x.rr).toFixed(1)+'R)':''):null));
+  add('SESSION', x.session);
+  add('CONFLUENCE', (x.confluence!=null? x.confluence+'/7':null));
+  const factors = Array.isArray(x.factors)? x.factors : [];
+  const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
+  let ai='';
+  if(x.ai && (x.ai.note||x.ai.label)){
+    ai = '<div style="margin-top:8px">'+aiBlock(x)+'</div>';
+  }
+  return '<div class="expand-detail">'+
+    '<div class="det-grid">'+rows.join('')+'</div>'+
+    (factorChips?'<div class="factors">'+factorChips+'</div>':'')+
+    ai+
+    '<div style="margin-top:8px">'+tvButton(x.pair)+'</div>'+
+  '</div>';
+}
+
+// toggle a row's detail panel (called on row click)
+function toggleDetail(el){
+  const d = el.querySelector('.expand-detail');
+  if(d) d.classList.toggle('show');
+}
 
 function signalCard(x){
   const bias = safe(x.bias,'bull');
@@ -217,6 +337,7 @@ function signalCard(x){
       '<span class="tag '+(isBull?'dir-bull':'dir-bear')+'">'+arrow+'</span>'+
       '<span class="tag type">'+safe(x.obType,'Swing')+'</span>'+
       '<span class="tag tf">'+safe(x.timeframe,'4H')+'</span>'+sessTag+
+      '<span style="margin-left:auto">'+tvButton(x.pair)+'</span>'+
     '</div>'+
     '<div class="factors">'+factorChips+'</div>'+
     '<div class="grid3">'+
@@ -260,12 +381,14 @@ function armedRow(x){
   if(x.ai && x.ai.label){
     aiTag='<span class="mini ai-row-label">◆ '+x.ai.label+'</span>';
   }
-  return '<div class="armed-row" style="flex-wrap:wrap">'+
+  return '<div class="armed-row clickable" style="flex-wrap:wrap" onclick="toggleDetail(this)">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
     sessTag+mit+ltfZone+
+    tvButton(x.pair)+
     '<span class="push-right mini" style="color:'+phaseColor+'">'+phase+'</span>'+
     (aiTag?'<div style="flex-basis:100%;margin-top:6px">'+aiTag+(x.ai.note?'<span class="mini ai-row-note"> — '+x.ai.note+'</span>':'')+'</div>':'')+
+    detailPanel(x)+
   '</div>';
 }
 
@@ -276,13 +399,15 @@ function watchRow(x){
   const dirColor = isBull?'var(--bull)':'var(--bear)';
   const zone = fmt(x.pair,x.obLow)+'–'+fmt(x.pair,x.obHigh);
   const dist = (x.distancePips!=null)? Number(x.distancePips).toFixed(1)+' pips' : '—';
-  return '<div class="watch-row">'+
+  return '<div class="watch-row clickable" onclick="toggleDetail(this)">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
     '<span class="mini" style="color:var(--text2)">'+safe(x.obType,'Swing')+'</span>'+
     '<span class="mini" style="color:var(--text3)">→ '+zone+'</span>'+
+    tvButton(x.pair)+
     '<span class="push-right" style="color:var(--text)">'+fmt(x.pair,x.price)+'</span>'+
     '<span class="mini" style="color:var(--text2);min-width:74px;text-align:right">'+dist+'</span>'+
+    detailPanel(x)+
   '</div>';
 }
 
@@ -359,23 +484,36 @@ async function getJSON(path){
 async function loadSignals(){
   const data = await getJSON('/signals');
   if(!Array.isArray(data)) return;
-  const bulls = data.filter(function(x){return x.bias==='bull';});
-  const bears = data.filter(function(x){return x.bias==='bear';});
+
+  // ── new-signal alert detection (before filtering) ──
+  const ids = data.map(function(x){ return (x.pair||'')+'|'+(x.bias||'')+'|'+(x.obLow||''); });
+  if(knownSignalIds !== null){
+    const fresh = data.filter(function(x){
+      const id = (x.pair||'')+'|'+(x.bias||'')+'|'+(x.obLow||'');
+      return knownSignalIds.indexOf(id) < 0;
+    });
+    fresh.forEach(function(x){ signalAlert(x); });
+  }
+  knownSignalIds = ids;
+
+  const bulls = applyFilters(data.filter(function(x){return x.bias==='bull';}));
+  const bears = applyFilters(data.filter(function(x){return x.bias==='bear';}));
   const bEl=$('bullSignals'), rEl=$('bearSignals');
   if(bEl) bEl.innerHTML = bulls.length? bulls.map(signalCard).join('') : '<div class="empty">NO BULLISH SIGNALS<div class="sub">SCANNING FOR OB CONFLUENCE…</div></div>';
   if(rEl) rEl.innerHTML = bears.length? bears.map(signalCard).join('') : '<div class="empty">NO BEARISH SIGNALS<div class="sub">SCANNING FOR OB CONFLUENCE…</div></div>';
   setText('c-bull', bulls.length);
   setText('c-bear', bears.length);
   setText('s-tot', data.length);
-  setText('s-bul', bulls.length);
-  setText('s-ber', bears.length);
+  setText('s-bul', data.filter(function(x){return x.bias==='bull';}).length);
+  setText('s-ber', data.filter(function(x){return x.bias==='bear';}).length);
 }
 
 async function loadArmed(){
   const data = await getJSON('/armed');
   if(!Array.isArray(data)) return;
+  const filtered = applyFilters(data);
   const el=$('armedList');
-  if(el) el.innerHTML = data.length? data.map(armedRow).join('') : '<div class="empty">NOTHING ARMED<div class="sub">PRICE NOT IN ANY 4H OB YET…</div></div>';
+  if(el) el.innerHTML = filtered.length? filtered.map(armedRow).join('') : '<div class="empty">NOTHING ARMED<div class="sub">PRICE NOT IN ANY 4H OB YET…</div></div>';
   setText('c-armed', data.length);
   setText('s-arm', data.length);
 }
@@ -383,8 +521,9 @@ async function loadArmed(){
 async function loadWatch(){
   const data = await getJSON('/watchlist');
   if(!Array.isArray(data)) return;
+  const filtered = applyFilters(data);
   const el=$('watchList');
-  if(el) el.innerHTML = data.length? data.map(watchRow).join('') : '<div class="empty">NO PAIRS APPROACHING<div class="sub">SCANNING…</div></div>';
+  if(el) el.innerHTML = filtered.length? filtered.map(watchRow).join('') : '<div class="empty">NO PAIRS APPROACHING<div class="sub">SCANNING…</div></div>';
   setText('c-watch', data.length);
 }
 
@@ -474,6 +613,60 @@ async function refreshAll(){
   await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory() ]);
 }
 
+// ---- signal alert (toast + optional beep) ----
+function beep(){
+  if(!soundOn) return;
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type='sine'; o.frequency.value=880;
+    g.gain.setValueAtTime(0.15, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.4);
+    o.start(); o.stop(ctx.currentTime+0.4);
+  }catch(e){}
+}
+function signalAlert(x){
+  const isBull = x.bias==='bull';
+  const toast = document.createElement('div');
+  toast.className = 'alert-toast'+(isBull?'':' bear');
+  toast.innerHTML = '<div class="t">'+(isBull?'▲ NEW LONG SIGNAL':'▼ NEW SHORT SIGNAL')+'</div>'+
+    '<div>'+safe(x.pair,'—')+' · '+safe(x.confluence,0)+'/7 confluence · tap to view chart</div>';
+  toast.onclick = function(){ window.open(tvLink(x.pair),'_blank'); toast.remove(); };
+  document.body.appendChild(toast);
+  requestAnimationFrame(function(){ toast.classList.add('show'); });
+  beep();
+  setTimeout(function(){ toast.classList.remove('show'); setTimeout(function(){toast.remove();}, 400); }, 12000);
+}
+
+// ---- wire up filter/sort/sound controls ----
+function wireControls(){
+  document.querySelectorAll('.ctrl-btn[data-filter]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const f = btn.getAttribute('data-filter'), v = btn.getAttribute('data-val');
+      filters[f] = (f==='conf')? Number(v) : v;
+      // toggle active within same filter group
+      document.querySelectorAll('.ctrl-btn[data-filter="'+f+'"]').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      loadSignals(); loadArmed(); loadWatch();
+    });
+  });
+  document.querySelectorAll('.ctrl-btn[data-sort]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      sortBy = btn.getAttribute('data-sort');
+      document.querySelectorAll('.ctrl-btn[data-sort]').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      loadSignals(); loadArmed(); loadWatch();
+    });
+  });
+  const st = $('soundToggle');
+  if(st) st.addEventListener('click', function(){
+    soundOn = !soundOn;
+    setText('soundState', 'SIGNAL ALERTS: '+(soundOn?'ON':'OFF'));
+  });
+}
+
+wireControls();
 refreshAll();
 setInterval(refreshAll, 15000);
 setInterval(updateClock, 1000);
