@@ -70,6 +70,10 @@ class SMCResult:
     liquidity_sweep: bool = False    # recent sweep of a prior high/low (stop hunt)
     double_tb: bool = False          # double top (bearish) / double bottom (bullish)
     sweep_level: float = None        # the level that was swept
+    near_sr: bool = False            # OB sits at a major daily S/R level
+    sr_level: float = None           # the major S/R level it aligns with (mid)
+    sr_hi: float = None              # S/R channel top
+    sr_lo: float = None              # S/R channel bottom
     confluence: int = 0              # total score 1-5
     factors: list = None             # human-readable list of met factors
     struct_aligned: bool = False     # is 15m structure aligned with the OB bias?
@@ -533,7 +537,7 @@ class SMCEngine:
                         return True, lv
         return False, None
 
-    def analyze(self, pair, candles_4h, candles_15m) -> Optional[SMCResult]:
+    def analyze(self, pair, candles_4h, candles_15m, sr_channels=None) -> Optional[SMCResult]:
         """
         Main entry point.
         - Compute SWING order blocks on the 4H timeframe (HTF AOI)
@@ -694,6 +698,21 @@ class SMCEngine:
             if result.double_tb:
                 score += 1
                 factors.append('Double Top' if not ob_bull else 'Double Bottom')
+
+            # ── major 4H S/R confluence (soft supporting factor) ──
+            # Uses LonesomeTheBlue SRchannel logic. Fires only when the 4H OB
+            # OVERLAPS a strong S/R channel (a zone price has respected many
+            # times). An OB in open space scores nothing. Supporting factor —
+            # does not trigger on its own.
+            if sr_channels:
+                ch = self.ob_overlaps_sr(hit_ob.low, hit_ob.high, sr_channels)
+                if ch is not None:
+                    result.near_sr = True
+                    result.sr_level = round((ch['hi'] + ch['lo']) / 2, 5)
+                    result.sr_hi = ch['hi']
+                    result.sr_lo = ch['lo']
+                    score += 1
+                    factors.append('Major S/R')
 
             result.confluence = score
             result.factors = factors
@@ -973,6 +992,127 @@ class SMCEngine:
         if (h >= 22) or (h < 9):
             return 'Asian'
         return 'Off'
+
+    def detect_sr_channels(self, candles, prd=10, loopback=290,
+                           channel_w_pct=5, min_strength=2, max_sr=6):
+        """
+        Faithful port of LonesomeTheBlue's 'Support Resistance Channels'
+        (SRchannel) indicator, run on the given candles (here: 4H).
+
+        Returns a list of channels: [{'hi': float, 'lo': float, 'strength': int}],
+        strongest first. Each channel is a ZONE (band), not a single line.
+
+        Algorithm (matching the Pine source):
+          1. Find pivot highs/lows (prd bars left & right).
+          2. Keep pivots within `loopback` bars.
+          3. Max channel width = (highest-lowest over 300 bars) * channel_w_pct%.
+          4. For each pivot, grow a channel by absorbing other pivots that fit
+             within the max width; each absorbed pivot adds 20 to a base score.
+          5. Add to each channel's strength the count of bars (over loopback)
+             whose high OR low falls inside the channel.
+          6. A channel needs strength >= min_strength*20 to qualify.
+          7. Keep the strongest channels, removing overlaps; cap at max_sr.
+        """
+        n = len(candles) if candles else 0
+        if n < prd * 2 + 2:
+            return []
+
+        highs = [c.high for c in candles]
+        lows  = [c.low for c in candles]
+
+        # 300-bar range for channel width (Pine uses highest/lowest of 300)
+        win = candles[-300:] if n >= 300 else candles
+        prdhighest = max(c.high for c in win)
+        prdlowest  = min(c.low for c in win)
+        cwidth = (prdhighest - prdlowest) * channel_w_pct / 100.0
+        if cwidth <= 0:
+            return []
+
+        # ── collect pivot values within loopback (newest `loopback` bars) ──
+        # pivot high at i: highs[i] is the max over [i-prd, i+prd]
+        pivots = []   # list of pivot price values
+        start = max(prd, n - loopback)
+        for i in range(start, n - prd):
+            seg_h = highs[i - prd:i + prd + 1]
+            seg_l = lows[i - prd:i + prd + 1]
+            if highs[i] == max(seg_h):
+                pivots.append(highs[i])
+            if lows[i] == min(seg_l):
+                pivots.append(lows[i])
+        if not pivots:
+            return []
+
+        # ── for each pivot, build a candidate channel (hi, lo, base strength) ──
+        def get_sr_vals(idx):
+            lo = pivots[idx]
+            hi = lo
+            numpp = 0
+            for cpp in pivots:
+                wdth = (hi - cpp) if cpp <= hi else (cpp - lo)
+                if wdth <= cwidth:
+                    if cpp <= hi:
+                        lo = min(lo, cpp)
+                    else:
+                        hi = max(hi, cpp)
+                    numpp += 20
+            return hi, lo, numpp
+
+        supres = []   # (strength, hi, lo)
+        for idx in range(len(pivots)):
+            hi, lo, strength = get_sr_vals(idx)
+            supres.append([strength, hi, lo])
+
+        # ── add touch-count strength: bars whose H or L falls in the channel ──
+        lb = min(loopback, n)
+        recent_h = highs[-lb:]
+        recent_l = lows[-lb:]
+        for entry in supres:
+            _, hi, lo = entry
+            touches = 0
+            for k in range(lb):
+                if (lo <= recent_h[k] <= hi) or (lo <= recent_l[k] <= hi):
+                    touches += 1
+            entry[0] += touches
+
+        # ── pick strongest channels, removing overlaps ──
+        thresh = min_strength * 20
+        channels = []
+        used = [False] * len(supres)
+        for _ in range(len(supres)):
+            best_i, best_s = -1, -1
+            for j in range(len(supres)):
+                if used[j]:
+                    continue
+                if supres[j][0] > best_s and supres[j][0] >= thresh:
+                    best_s = supres[j][0]
+                    best_i = j
+            if best_i < 0:
+                break
+            s, hi, lo = supres[best_i]
+            channels.append({'hi': round(hi, 5), 'lo': round(lo, 5), 'strength': int(s)})
+            # mark overlapping channels used (so we don't duplicate the zone)
+            for j in range(len(supres)):
+                if used[j]:
+                    continue
+                _, jhi, jlo = supres[j]
+                if (jlo <= hi and jhi >= lo):   # overlaps the chosen channel
+                    used[j] = True
+            if len(channels) >= max_sr:
+                break
+
+        return channels
+
+    def ob_overlaps_sr(self, ob_low, ob_high, sr_channels):
+        """
+        Does the 4H OB zone (ob_low..ob_high) overlap any S/R channel?
+        Returns the overlapping channel dict if so, else None.
+        """
+        if not sr_channels:
+            return None
+        for ch in sr_channels:
+            if ob_low <= ch['hi'] and ob_high >= ch['lo']:   # zone overlap
+                return ch
+        return None
 
     def _detect_double_top_bottom(self, candles, bias, near_price, tolerance):
         """
