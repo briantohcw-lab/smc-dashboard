@@ -61,7 +61,26 @@ CANDLE_TZ = os.environ.get('CANDLE_TZ', 'America/New_York').strip()
 # zones that price has tapped before). Set env FIRST_TAP_ONLY=0 to disable.
 FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '1').strip() not in ('0', 'false', 'False')
 
-engine = SMCEngine(swing_length=50, internal_length=5, first_tap_only=FIRST_TAP_ONLY)
+# mitigation_window: how many 15m bars an armed setup stays active after price
+# taps the 4H OB (waiting for 15m confirmation), even if price wicked out.
+# 40 bars = ~10 hours. Raised from 20 because the engine only scans every 2h,
+# so a short window gave only 2-3 scans to catch a confirmation. Env: MIT_WINDOW.
+MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '40'))
+
+# ── Major 4H S/R confluence (LonesomeTheBlue SRchannel logic) ──
+# Detected from the 4H candles we ALREADY fetch (no extra API credits, no
+# caching needed). Used as a soft 7th confluence factor when a 4H OB OVERLAPS
+# a strong S/R channel. Params match the original indicator's defaults.
+SR_ENABLED      = os.environ.get('SR_ENABLED', '1').strip() not in ('0', 'false', 'False')
+SR_PRD          = int(os.environ.get('SR_PRD', '10'))       # pivot period
+SR_LOOPBACK     = int(os.environ.get('SR_LOOPBACK', '290')) # bars to scan
+SR_CHANNEL_W    = int(os.environ.get('SR_CHANNEL_W', '5'))  # max channel width %
+SR_MIN_STRENGTH = int(os.environ.get('SR_MIN_STRENGTH', '2'))
+SR_MAX          = int(os.environ.get('SR_MAX', '6'))        # max channels
+
+engine = SMCEngine(swing_length=50, internal_length=5,
+                   first_tap_only=FIRST_TAP_ONLY,
+                   mitigation_window=MIT_WINDOW)
 
 # ── Shared state ──
 signals = []          # current live signals shown on dashboard
@@ -237,7 +256,18 @@ def scan_once():
         scanned += 1
         candle_cache[symbol.replace('/', '')] = (c4, c15)
 
-        res = engine.analyze(symbol, c4, c15)
+        # major S/R channels from the 4H candles we already have (no extra API)
+        sr_channels = []
+        if SR_ENABLED:
+            try:
+                sr_channels = engine.detect_sr_channels(
+                    c4, prd=SR_PRD, loopback=SR_LOOPBACK,
+                    channel_w_pct=SR_CHANNEL_W, min_strength=SR_MIN_STRENGTH,
+                    max_sr=SR_MAX)
+            except Exception:
+                sr_channels = []
+
+        res = engine.analyze(symbol, c4, c15, sr_channels=sr_channels)
         if res is None:
             continue
 
@@ -278,6 +308,10 @@ def scan_once():
             'fvg':        res.fvg,
             'eqhl':       res.eqhl,
             'sweep':      res.liquidity_sweep,
+            'nearSr':     res.near_sr,
+            'srLevel':    res.sr_level,
+            'srHi':       res.sr_hi,
+            'srLo':       res.sr_lo,
             'confluence': res.confluence,
             'factors':    res.factors,
             'slPrice':    res.sl_price,
