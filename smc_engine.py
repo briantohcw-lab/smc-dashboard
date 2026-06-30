@@ -113,7 +113,8 @@ class SMCEngine:
                  swing_only: bool = True, default_rr: float = 2.0,
                  swing_max_age: int = 500, internal_max_age: int = 120,
                  mitigation_window: int = 20,
-                 first_tap_only: bool = True):
+                 first_tap_only: bool = True,
+                 arm_penetration: float = 0.25):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
@@ -123,6 +124,9 @@ class SMCEngine:
         # already-mitigated zone are skipped (lower-quality re-entries). Set
         # False to arm on every tap.
         self.first_tap_only = first_tap_only
+        # how deep into the OB price must be before arming (fraction of zone
+        # depth). Higher = stricter = fewer but more reliable arms.
+        self.arm_penetration = max(0.0, min(0.9, arm_penetration))
         # swing_only: only use 4H SWING order blocks for signals & watchlist.
         # Internal OBs are noisy and produce zones not shown on the chart,
         # which caused phantom signals (e.g. NZDCAD, USDCHF). Default True.
@@ -156,6 +160,36 @@ class SMCEngine:
             window = trs[start:i+1]
             atr.append(sum(window) / len(window))
         return atr
+
+    def _parsed_hl(self, candles):
+        """
+        LuxAlgo volatility parsing for order blocks.
+
+        LuxAlgo measures volatility with ATR(200) and, on any candle where
+        (high - low) >= 2 * ATR (a 'high volatility bar'), it SWAPS the high and
+        low it uses when building order blocks:
+            parsedHigh = highVolatilityBar ? low : high
+            parsedLow  = highVolatilityBar ? high : low
+        This stops a single huge volatile candle from defining an oversized OB
+        zone — on those bars the OB is built from the swapped (tighter) values.
+
+        Returns two lists (parsed_highs, parsed_lows) aligned to `candles`.
+        On normal candles these equal the raw high/low (no change).
+        """
+        n = len(candles)
+        atr200 = self._atr(candles, 200)
+        ph = [0.0] * n
+        pl = [0.0] * n
+        for i in range(n):
+            c = candles[i]
+            hi_vol = (c.high - c.low) >= (2.0 * atr200[i]) and atr200[i] > 0
+            if hi_vol:
+                ph[i] = c.low   # swapped
+                pl[i] = c.high
+            else:
+                ph[i] = c.high
+                pl[i] = c.low
+        return ph, pl
 
     # ── Leg detection (the heart of LuxAlgo pivot logic) ──
     def _legs(self, candles, size):
@@ -202,6 +236,8 @@ class SMCEngine:
         """
         n = len(candles)
         legs = self._legs(candles, size)
+        # LuxAlgo volatility-parsed highs/lows used when building order blocks
+        parsed_highs, parsed_lows = self._parsed_hl(candles)
 
         piv_high = Pivot()
         piv_low = Pivot()
@@ -238,7 +274,7 @@ class SMCEngine:
                     tag = 'CHoCH' if trend == BEARISH else 'BOS'
                     piv_high.crossed = True
                     trend = BULLISH
-                    ob = self._find_ob(candles, piv_high.bar_index, i, BULLISH)
+                    ob = self._find_ob(candles, piv_high.bar_index, i, BULLISH, parsed_highs, parsed_lows)
                     if ob:
                         order_blocks.insert(0, ob)
                     piv_high.last_structure = tag
@@ -249,38 +285,57 @@ class SMCEngine:
                     tag = 'CHoCH' if trend == BULLISH else 'BOS'
                     piv_low.crossed = True
                     trend = BEARISH
-                    ob = self._find_ob(candles, piv_low.bar_index, i, BEARISH)
+                    ob = self._find_ob(candles, piv_low.bar_index, i, BEARISH, parsed_highs, parsed_lows)
                     if ob:
                         order_blocks.insert(0, ob)
                     piv_low.last_structure = tag
 
         return piv_high, piv_low, trend, order_blocks
 
-    def _find_ob(self, candles, from_idx, to_idx, bias):
+    def _find_ob(self, candles, from_idx, to_idx, bias, parsed_highs=None, parsed_lows=None):
         """
-        LuxAlgo: the order block is the extreme candle in the leg before the break.
-        For a BULLISH break -> find the candle with the LOWEST low in the range
+        LuxAlgo: the order block is the extreme candle in the leg before the break,
+        using the VOLATILITY-PARSED high/low (see _parsed_hl).
+        For a BULLISH break -> the candle with the lowest PARSED low in the range
         (the last down-move before price broke up) = demand zone.
-        For a BEARISH break -> find the candle with the HIGHEST high = supply zone.
+        For a BEARISH break -> the candle with the highest PARSED high = supply zone.
+        The OB zone itself is taken from the parsed values at that candle, exactly
+        as LuxAlgo stores parsedHighs.get(index) / parsedLows.get(index).
         """
         if from_idx < 0 or to_idx <= from_idx:
             return None
-        segment = candles[from_idx:to_idx]
-        if not segment:
+        seg_lo = from_idx
+        seg_hi = to_idx
+        if seg_hi > len(candles):
+            seg_hi = len(candles)
+        if seg_lo >= seg_hi:
             return None
 
+        # use parsed arrays if provided (LuxAlgo behaviour); else fall back to raw
+        if parsed_highs is not None and parsed_lows is not None:
+            if bias == BULLISH:
+                best_i = min(range(seg_lo, seg_hi), key=lambda k: parsed_lows[k])
+            else:
+                best_i = max(range(seg_lo, seg_hi), key=lambda k: parsed_highs[k])
+            ob_high = parsed_highs[best_i]
+            ob_low  = parsed_lows[best_i]
+            # parsed values can be swapped; ensure high >= low for a valid zone
+            if ob_high < ob_low:
+                ob_high, ob_low = ob_low, ob_high
+            return OrderBlock(
+                high=ob_high, low=ob_low,
+                time=candles[best_i].time, bias=bias, bar_index=best_i)
+
+        # fallback: raw high/low (original behaviour)
+        segment = candles[seg_lo:seg_hi]
         if bias == BULLISH:
             ob_candle = min(segment, key=lambda c: c.low)
         else:
             ob_candle = max(segment, key=lambda c: c.high)
-
         return OrderBlock(
-            high=ob_candle.high,
-            low=ob_candle.low,
-            time=ob_candle.time,
-            bias=bias,
-            bar_index=candles.index(ob_candle)
-        )
+            high=ob_candle.high, low=ob_candle.low,
+            time=ob_candle.time, bias=bias,
+            bar_index=candles.index(ob_candle))
 
     def _prune_mitigated(self, candles, order_blocks, max_age=None):
         """
@@ -576,9 +631,27 @@ class SMCEngine:
             last_struct_bias_15 = BEARISH
 
         # ── Check if price is inside a live 4H OB, OR recently mitigated one ──
+        # Require price to be MEANINGFULLY inside the OB, not just grazing the
+        # edge. Because the dashboard's data feed differs slightly from your
+        # broker/TradingView feed, an edge-graze here can look like "not near
+        # the OB at all" on your chart. Requiring price to be past a fraction of
+        # the zone depth (self.arm_penetration) keeps armed setups genuinely
+        # near the zone on your chart too. 0.0 = touch edge (old behaviour),
+        # 0.3 = must be 30% into the zone, etc.
         def price_in_ob(obs, ob_type):
             for ob in obs:
-                if ob.low <= price <= ob.high:
+                depth = ob.high - ob.low
+                if depth <= 0:
+                    continue
+                pad = depth * self.arm_penetration
+                # bullish/demand OB: price enters from the TOP, so require it to
+                # be at least `pad` below the high. bearish/supply: enters from
+                # the BOTTOM, require at least `pad` above the low.
+                if ob.bias == BULLISH:
+                    lo_edge, hi_edge = ob.low, ob.high - pad
+                else:
+                    lo_edge, hi_edge = ob.low + pad, ob.high
+                if lo_edge <= price <= hi_edge:
                     return ob, ob_type
             return None, None
 
