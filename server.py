@@ -13,7 +13,7 @@ Set these as Railway environment variables:
   SCAN_INTERVAL    = seconds between scans (default 300 = 5 min)
 """
 
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, request
 from flask_cors import CORS
 from datetime import datetime, timezone
 import os, time, threading, urllib.request, urllib.parse, urllib.error, json
@@ -67,6 +67,14 @@ FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '1').strip() not in ('0', 'fal
 # so a short window gave only 2-3 scans to catch a confirmation. Env: MIT_WINDOW.
 MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '40'))
 
+# How deep into a 4H OB price must be before arming (fraction of zone depth).
+# Because the free data feed differs from your broker/TradingView feed, arming
+# on a mere edge-graze often looks like "not near the OB" on your chart.
+# Requiring real penetration keeps armed pairs genuinely near the zone on your
+# chart. 0.0 = old edge-touch behaviour; 0.25 = must be 25% into the zone.
+# Raise for stricter/fewer arms, lower to keep more. Env: ARM_PENETRATION.
+ARM_PENETRATION = float(os.environ.get('ARM_PENETRATION', '0.25'))
+
 # ── Major 4H S/R confluence (LonesomeTheBlue SRchannel logic) ──
 # Detected from the 4H candles we ALREADY fetch (no extra API credits, no
 # caching needed). Used as a soft 7th confluence factor when a 4H OB OVERLAPS
@@ -80,7 +88,8 @@ SR_MAX          = int(os.environ.get('SR_MAX', '6'))        # max channels
 
 engine = SMCEngine(swing_length=50, internal_length=5,
                    first_tap_only=FIRST_TAP_ONLY,
-                   mitigation_window=MIT_WINDOW)
+                   mitigation_window=MIT_WINDOW,
+                   arm_penetration=ARM_PENETRATION)
 
 # ── Shared state ──
 signals = []          # current live signals shown on dashboard
@@ -556,6 +565,47 @@ def scan_now():
     """Trigger an immediate scan (useful for testing)."""
     threading.Thread(target=scan_once, daemon=True).start()
     return jsonify({'status': 'scan triggered'})
+
+
+@app.route('/settings')
+def get_settings():
+    """Return the current live arming settings (for the dashboard controls)."""
+    return jsonify({
+        'arm_penetration': engine.arm_penetration,
+        'first_tap_only': engine.first_tap_only,
+    })
+
+
+@app.route('/set-settings')
+def set_settings():
+    """
+    Update arming settings LIVE without a redeploy. Query params (all optional):
+      penetration=0.0..0.9   how deep into the OB before arming
+      first_tap=1|0          arm only on first tap, or every tap
+    Changes take effect on the NEXT scan. Optionally pass rescan=1 to trigger
+    an immediate scan so the change shows right away.
+    """
+    changed = {}
+    pen = request.args.get('penetration')
+    if pen is not None:
+        try:
+            v = max(0.0, min(0.9, float(pen)))
+            engine.arm_penetration = v
+            changed['arm_penetration'] = v
+        except ValueError:
+            return jsonify({'error': 'penetration must be a number 0..0.9'}), 400
+    ft = request.args.get('first_tap')
+    if ft is not None:
+        v = ft.strip() not in ('0', 'false', 'False')
+        engine.first_tap_only = v
+        changed['first_tap_only'] = v
+    # optional immediate rescan so the user sees the effect without waiting
+    if request.args.get('rescan') in ('1', 'true', 'True'):
+        threading.Thread(target=scan_once, daemon=True).start()
+        changed['rescan'] = True
+    return jsonify({'status': 'ok', 'changed': changed,
+                    'arm_penetration': engine.arm_penetration,
+                    'first_tap_only': engine.first_tap_only})
 
 
 @app.route('/backtest')
