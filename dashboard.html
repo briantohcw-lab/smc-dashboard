@@ -194,7 +194,21 @@
       <button class="ctrl-btn" data-sort="dist">DISTANCE</button>
       <button class="ctrl-btn" data-sort="pair">PAIR</button>
     </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">ARM DEPTH</span>
+      <button class="ctrl-btn" data-arm="0" title="Arm as soon as price touches inside the OB">EDGE</button>
+      <button class="ctrl-btn" data-arm="0.25">25%</button>
+      <button class="ctrl-btn" data-arm="0.5">50%</button>
+      <button class="ctrl-btn" data-arm="0.75">75%</button>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">FIRST TAP</span>
+      <button class="ctrl-btn" id="firstTapBtn" data-ft="toggle">…</button>
+    </div>
     <div class="sound-toggle" id="soundToggle">🔔 <span id="soundState">SIGNAL ALERTS: ON</span></div>
+  </div>
+  <div class="arm-note" id="armNote" style="font-size:11px;color:var(--text3);padding:2px 4px 8px 4px;">
+    Arming controls apply on the next scan. EDGE = armed the moment price is inside the OB (loosest). Higher % = price must be deeper in the zone (stricter).
   </div>
 
   <div class="two-col">
@@ -664,6 +678,50 @@ function wireControls(){
     soundOn = !soundOn;
     setText('soundState', 'SIGNAL ALERTS: '+(soundOn?'ON':'OFF'));
   });
+
+  // ARM DEPTH buttons — set penetration live on the server
+  document.querySelectorAll('.ctrl-btn[data-arm]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      const v = btn.getAttribute('data-arm');
+      document.querySelectorAll('.ctrl-btn[data-arm]').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      const note = $('armNote');
+      if(note) note.textContent = 'Applying… penetration '+Math.round(Number(v)*100)+'%. Takes effect on the next scan (triggering one now).';
+      await getJSON('/set-settings?penetration='+v+'&rescan=1');
+      if(note) setTimeout(function(){ note.textContent = 'Arming controls apply on the next scan. EDGE = armed the moment price is inside the OB (loosest). Higher % = price must be deeper in the zone (stricter).'; }, 4000);
+    });
+  });
+
+  // FIRST TAP toggle
+  const ftBtn = $('firstTapBtn');
+  if(ftBtn) ftBtn.addEventListener('click', async function(){
+    const now = ftBtn.getAttribute('data-on') === '1';
+    const next = now ? '0' : '1';
+    await getJSON('/set-settings?first_tap='+next+'&rescan=1');
+    setFirstTapUI(next==='1');
+  });
+
+  // sync UI with the server's current settings
+  syncSettingsUI();
+}
+
+function setFirstTapUI(on){
+  const ftBtn = document.getElementById('firstTapBtn');
+  if(!ftBtn) return;
+  ftBtn.setAttribute('data-on', on?'1':'0');
+  ftBtn.textContent = on ? 'FIRST ONLY' : 'EVERY TAP';
+  ftBtn.classList.toggle('active', on);
+}
+
+async function syncSettingsUI(){
+  const s = await getJSON('/settings');
+  if(!s) return;
+  // highlight the matching ARM DEPTH button
+  const pen = String(s.arm_penetration);
+  document.querySelectorAll('.ctrl-btn[data-arm]').forEach(function(b){
+    b.classList.toggle('active', Number(b.getAttribute('data-arm'))===Number(s.arm_penetration));
+  });
+  setFirstTapUI(!!s.first_tap_only);
 }
 
 wireControls();
