@@ -86,7 +86,14 @@ SR_CHANNEL_W    = int(os.environ.get('SR_CHANNEL_W', '5'))  # max channel width 
 SR_MIN_STRENGTH = int(os.environ.get('SR_MIN_STRENGTH', '2'))
 SR_MAX          = int(os.environ.get('SR_MAX', '6'))        # max channels
 
-engine = SMCEngine(swing_length=50, internal_length=5,
+# Swing length for 4H OB detection. LuxAlgo's default of 50 is tuned for
+# DISPLAYING swing points, but it's too large for OB generation on ~300 bars:
+# pivots rarely form, so almost no OBs are detected and nothing ever arms.
+# 25 still captures meaningful swings while actually producing OBs. Lower it
+# for more (smaller) OBs, raise it for fewer (larger-swing) OBs.
+SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '25'))
+
+engine = SMCEngine(swing_length=SWING_LENGTH, internal_length=5,
                    first_tap_only=FIRST_TAP_ONLY,
                    mitigation_window=MIT_WINDOW,
                    arm_penetration=ARM_PENETRATION)
