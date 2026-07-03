@@ -118,6 +118,11 @@ scan_log = {          # diagnostics shown in dashboard footer
 }
 _lock = threading.Lock()
 
+# Candles from the most recent successful scan, cached so ARM DEPTH / FIRST TAP
+# changes can re-classify WITHOUT re-fetching from Twelve Data (0 credits).
+_last_scan_candles = {}          # symbol(with slash) -> (c4, c15, sr_channels)
+_last_scan_lock = threading.Lock()
+
 # Free Twelve Data tier daily limit
 DAILY_CREDIT_LIMIT = int(os.environ.get('DAILY_CREDIT_LIMIT', '800'))
 
@@ -256,6 +261,7 @@ def scan_once():
 
     dropped = []
     candle_cache = {}   # pair(clean) -> (c4, c15) for post-scan AI analysis
+    scan_candles = {}   # symbol(with slash) -> (c4, c15, sr_channels) for reanalyze
     for idx, symbol in enumerate(ordered):
         scan_log['current_pair'] = symbol
         c4 = fetch_candles(symbol, HTF_TF, HTF_BARS)
@@ -283,6 +289,7 @@ def scan_once():
             except Exception:
                 sr_channels = []
 
+        scan_candles[symbol] = (c4, c15, sr_channels)
         res = engine.analyze(symbol, c4, c15, sr_channels=sr_channels)
         if res is None:
             continue
@@ -357,6 +364,12 @@ def scan_once():
             # missing the setup entirely.
             entry['m15needed'] = 'bearish CHoCH' if not ob_bull else 'bullish CHoCH'
             new_armed.append(entry)
+
+    # cache this scan's candles so ARM DEPTH / FIRST TAP toggles can
+    # re-classify instantly without spending API credits
+    with _last_scan_lock:
+        _last_scan_candles.clear()
+        _last_scan_candles.update(scan_candles)
 
     # sort watchlist by closest first, keep top 12
     watch.sort(key=lambda w: w['distancePips'])
@@ -489,6 +502,93 @@ def scan_once():
         scan_log['current_pair'] = None
 
 
+def reanalyze_from_cache():
+    """
+    Rebuild signals / armed / watchlist from the LAST scan's cached candles,
+    using the engine's CURRENT arm_penetration / first_tap_only settings.
+    Makes ZERO Twelve Data calls — safe to run on every filter toggle.
+    Returns True if it ran, False if no scan has been cached yet.
+    """
+    with _last_scan_lock:
+        cache = list(_last_scan_candles.items())
+    if not cache:
+        return False
+
+    new_signals, new_armed, watch = [], [], []
+
+    for symbol, (c4, c15, sr_channels) in cache:
+        try:
+            res = engine.analyze(symbol, c4, c15, sr_channels=sr_channels)
+        except Exception:
+            continue
+        if res is None:
+            continue
+
+        if not res.in_ob:
+            if res.near_distance_pips is not None:
+                watch.append({
+                    'pair':     symbol.replace('/', ''),
+                    'price':    round(res.price, 5),
+                    'bias':     'bull' if res.near_ob_bias == BULLISH else 'bear',
+                    'obType':   res.near_ob_type,
+                    'obHigh':   round(res.near_ob_high, 5),
+                    'obLow':    round(res.near_ob_low, 5),
+                    'distancePips': res.near_distance_pips,
+                })
+            continue
+
+        ob_bull = (res.ob_bias == BULLISH)
+        struct_aligned = res.struct_aligned
+        entry = {
+            'pair':       symbol.replace('/', ''),
+            'price':      round(res.price, 5),
+            'bias':       'bull' if ob_bull else 'bear',
+            'obType':     res.ob_type,
+            'obHigh':     round(res.ob_high, 5),
+            'obLow':      round(res.ob_low, 5),
+            'm15struct':  res.last_structure if struct_aligned else None,
+            'fvg':        res.fvg,
+            'eqhl':       res.eqhl,
+            'sweep':      res.liquidity_sweep,
+            'nearSr':     res.near_sr,
+            'srLevel':    res.sr_level,
+            'srHi':       res.sr_hi,
+            'srLo':       res.sr_lo,
+            'confluence': res.confluence,
+            'factors':    res.factors,
+            'slPrice':    res.sl_price,
+            'tpPrice':    res.tp_price,
+            'slPips':     res.sl_pips,
+            'tpPips':     res.tp_pips,
+            'rr':         res.rr,
+            'alert':      ('Bullish' if ob_bull else 'Bearish') + res.ob_type + 'OB',
+            'timeframe':  '4H',
+            'aligned':    struct_aligned,
+            'session':    res.session,
+            'mitigated':  res.mitigated,
+            'currentlyIn': res.currently_in_ob,
+            'barsSinceMit': res.bars_since_mit,
+            'brState':    res.br_state,
+            'ltfObHigh':  res.ltf_ob_high,
+            'ltfObLow':   res.ltf_ob_low,
+            'receivedAt': datetime.now(timezone.utc).isoformat(),
+        }
+        if struct_aligned:
+            new_signals.append(entry)
+        else:
+            entry['m15needed'] = 'bearish CHoCH' if not ob_bull else 'bullish CHoCH'
+            new_armed.append(entry)
+
+    watch.sort(key=lambda w: w['distancePips'])
+    watch_top = watch[:12]
+
+    with _lock:
+        signals.clear();   signals.extend(new_signals)
+        armed.clear();     armed.extend(new_armed)
+        watchlist.clear(); watchlist.extend(watch_top)
+    return True
+
+
 # ── Background scan loop ──
 def scan_loop():
     # daily credit reset is handled by the persistent store (resets when the
@@ -589,8 +689,10 @@ def set_settings():
     Update arming settings LIVE without a redeploy. Query params (all optional):
       penetration=0.0..0.9   how deep into the OB before arming
       first_tap=1|0          arm only on first tap, or every tap
-    Changes take effect on the NEXT scan. Optionally pass rescan=1 to trigger
-    an immediate scan so the change shows right away.
+    Changes take effect on the NEXT scan. Pass reclassify=1 to instantly
+    rebuild armed/signals/watchlist from the LAST scan's cached candles with
+    ZERO API credits (this is what the dashboard filter buttons use). Pass
+    rescan=1 only if you want a full fresh fetch (costs credits).
     """
     changed = {}
     pen = request.args.get('penetration')
@@ -606,6 +708,10 @@ def set_settings():
         v = ft.strip() not in ('0', 'false', 'False')
         engine.first_tap_only = v
         changed['first_tap_only'] = v
+    # instant reclassify from cached candles — 0 API credits. This is what the
+    # ARM DEPTH / FIRST TAP buttons use so toggling never re-fetches data.
+    if request.args.get('reclassify') in ('1', 'true', 'True'):
+        changed['reclassified'] = reanalyze_from_cache()
     # optional immediate rescan so the user sees the effect without waiting
     if request.args.get('rescan') in ('1', 'true', 'True'):
         threading.Thread(target=scan_once, daemon=True).start()
