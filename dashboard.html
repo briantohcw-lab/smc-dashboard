@@ -679,26 +679,33 @@ function wireControls(){
     setText('soundState', 'SIGNAL ALERTS: '+(soundOn?'ON':'OFF'));
   });
 
-  // ARM DEPTH buttons — set penetration live on the server
+  // ARM DEPTH buttons — reclassify from the LAST scan's cached candles.
+  // ZERO API credits: no re-fetch, just re-runs the arming logic locally.
   document.querySelectorAll('.ctrl-btn[data-arm]').forEach(function(btn){
     btn.addEventListener('click', async function(){
       const v = btn.getAttribute('data-arm');
       document.querySelectorAll('.ctrl-btn[data-arm]').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       const note = $('armNote');
-      if(note) note.textContent = 'Applying… penetration '+Math.round(Number(v)*100)+'%. Takes effect on the next scan (triggering one now).';
-      await getJSON('/set-settings?penetration='+v+'&rescan=1');
-      if(note) setTimeout(function(){ note.textContent = 'Arming controls apply on the next scan. EDGE = armed the moment price is inside the OB (loosest). Higher % = price must be deeper in the zone (stricter).'; }, 4000);
+      const r = await getJSON('/set-settings?penetration='+v+'&reclassify=1');
+      loadSignals(); loadArmed(); loadWatch();
+      if(note){
+        note.textContent = (r && r.reclassified)
+          ? 'Applied '+Math.round(Number(v)*100)+'% depth — reclassified instantly (0 credits).'
+          : 'Applied '+Math.round(Number(v)*100)+'% depth. No scan cached yet; takes effect on the next scan.';
+        setTimeout(function(){ note.textContent = 'Arming controls re-filter the last scan instantly — no API credits. EDGE = armed the moment price is inside the OB (loosest). Higher % = deeper in the zone (stricter).'; }, 4000);
+      }
     });
   });
 
-  // FIRST TAP toggle
+  // FIRST TAP toggle — also reclassify from cache, 0 credits
   const ftBtn = $('firstTapBtn');
   if(ftBtn) ftBtn.addEventListener('click', async function(){
     const now = ftBtn.getAttribute('data-on') === '1';
     const next = now ? '0' : '1';
-    await getJSON('/set-settings?first_tap='+next+'&rescan=1');
+    await getJSON('/set-settings?first_tap='+next+'&reclassify=1');
     setFirstTapUI(next==='1');
+    loadSignals(); loadArmed(); loadWatch();
   });
 
   // sync UI with the server's current settings
