@@ -114,7 +114,8 @@ class SMCEngine:
                  swing_max_age: int = 500, internal_max_age: int = 120,
                  mitigation_window: int = 20,
                  first_tap_only: bool = True,
-                 arm_penetration: float = 0.25):
+                 arm_penetration: float = 0.25,
+                 htf_trend_filter: bool = False):
         self.swing_length = swing_length
         self.internal_length = internal_length
         self.atr_period = atr_period
@@ -143,6 +144,13 @@ class SMCEngine:
         # stays "armed" (watching for 15m CHoCH), even if price wicked back out.
         # 20 bars = ~5 hours, covering a NY session for periodic checking.
         self.mitigation_window = mitigation_window
+        # htf_trend_filter: only arm OBs whose bias AGREES with the 4H swing
+        # trend. Bearish 4H trend (last swing break was down) => arm ONLY supply
+        # (bearish) OBs -> shorts. Bullish => ONLY demand (bullish) OBs -> longs.
+        # This stops the engine arming a counter-trend zone (e.g. a stray bullish
+        # demand OB while the 4H has made a bearish CHoCH and is dropping — the
+        # EURCHF phantom-long case). Set False to allow counter-trend zones.
+        self.htf_trend_filter = htf_trend_filter
 
     # ── ATR (for OB volatility filter & structure noise) ──
     def _atr(self, candles, period):
@@ -616,6 +624,18 @@ class SMCEngine:
         sh4i, sl4i, trend4i, obs4_int = self._process_structure(
             candles_4h, self.internal_length, internal=True)
         obs4_int = self._prune_mitigated(candles_4h, obs4_int, max_age=self.internal_max_age)
+
+        # ── HTF trend-alignment filter ──
+        # Keep only order blocks whose bias agrees with the 4H SWING trend.
+        # This is what stops a counter-trend zone from arming: if the 4H has
+        # broken down (bearish CHoCH/BOS => trend4 == BEARISH), a stray bullish
+        # demand OB no longer arms a LONG — only bearish supply OBs survive, so
+        # the tool tracks the SELL side you actually want. trend4 == 0 means no
+        # confirmed structure yet, so we don't filter. Disable via
+        # htf_trend_filter=False to allow counter-trend zones.
+        if self.htf_trend_filter and trend4 != 0:
+            obs4_swing = [ob for ob in obs4_swing if ob.bias == trend4]
+            obs4_int   = [ob for ob in obs4_int   if ob.bias == trend4]
 
         # ── LTF (15M) internal structure for confirmation ──
         sh15, sl15, trend15, _ = self._process_structure(
