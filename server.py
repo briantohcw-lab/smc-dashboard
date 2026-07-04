@@ -93,10 +93,18 @@ SR_MAX          = int(os.environ.get('SR_MAX', '6'))        # max channels
 # for more (smaller) OBs, raise it for fewer (larger-swing) OBs.
 SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '25'))
 
+# htf_trend_filter: only arm OBs aligned with the 4H swing trend (bearish trend
+# => only short/supply OBs; bullish => only long/demand OBs). OFF by default so
+# the engine arms EVERY pair sitting in a 4H OB (both directions); toggle it on
+# from the dashboard TREND button to hide counter-trend arms. Set
+# HTF_TREND_FILTER=1 to have it on at boot.
+HTF_TREND_FILTER = os.environ.get('HTF_TREND_FILTER', '0').strip() not in ('0', 'false', 'False')
+
 engine = SMCEngine(swing_length=SWING_LENGTH, internal_length=5,
                    first_tap_only=FIRST_TAP_ONLY,
                    mitigation_window=MIT_WINDOW,
-                   arm_penetration=ARM_PENETRATION)
+                   arm_penetration=ARM_PENETRATION,
+                   htf_trend_filter=HTF_TREND_FILTER)
 
 # ── Shared state ──
 signals = []          # current live signals shown on dashboard
@@ -348,6 +356,7 @@ def scan_once():
             'session':    res.session,
             'mitigated':  res.mitigated,
             'currentlyIn': res.currently_in_ob,
+            'htfTrend':   'bull' if res.swing_trend == BULLISH else ('bear' if res.swing_trend == BEARISH else None),
             'barsSinceMit': res.bars_since_mit,
             'brState':    res.br_state,
             'ltfObHigh':  res.ltf_ob_high,
@@ -567,6 +576,7 @@ def reanalyze_from_cache():
             'session':    res.session,
             'mitigated':  res.mitigated,
             'currentlyIn': res.currently_in_ob,
+            'htfTrend':   'bull' if res.swing_trend == BULLISH else ('bear' if res.swing_trend == BEARISH else None),
             'barsSinceMit': res.bars_since_mit,
             'brState':    res.br_state,
             'ltfObHigh':  res.ltf_ob_high,
@@ -680,6 +690,7 @@ def get_settings():
     return jsonify({
         'arm_penetration': engine.arm_penetration,
         'first_tap_only': engine.first_tap_only,
+        'htf_trend_filter': engine.htf_trend_filter,
     })
 
 
@@ -708,6 +719,11 @@ def set_settings():
         v = ft.strip() not in ('0', 'false', 'False')
         engine.first_tap_only = v
         changed['first_tap_only'] = v
+    tf = request.args.get('trend_filter')
+    if tf is not None:
+        v = tf.strip() not in ('0', 'false', 'False')
+        engine.htf_trend_filter = v
+        changed['htf_trend_filter'] = v
     # instant reclassify from cached candles — 0 API credits. This is what the
     # ARM DEPTH / FIRST TAP buttons use so toggling never re-fetches data.
     if request.args.get('reclassify') in ('1', 'true', 'True'):
@@ -718,7 +734,8 @@ def set_settings():
         changed['rescan'] = True
     return jsonify({'status': 'ok', 'changed': changed,
                     'arm_penetration': engine.arm_penetration,
-                    'first_tap_only': engine.first_tap_only})
+                    'first_tap_only': engine.first_tap_only,
+                    'htf_trend_filter': engine.htf_trend_filter})
 
 
 @app.route('/backtest')
