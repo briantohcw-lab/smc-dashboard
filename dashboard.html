@@ -205,6 +205,10 @@
       <span class="ctrl-lbl">FIRST TAP</span>
       <button class="ctrl-btn" id="firstTapBtn" data-ft="toggle">…</button>
     </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">TREND</span>
+      <button class="ctrl-btn" id="trendFilterBtn" data-tf="toggle" title="When ON, only arms OBs that agree with the 4H swing trend (hides counter-trend arms)">…</button>
+    </div>
     <div class="sound-toggle" id="soundToggle">🔔 <span id="soundState">SIGNAL ALERTS: ON</span></div>
   </div>
   <div class="arm-note" id="armNote" style="font-size:11px;color:var(--text3);padding:2px 4px 8px 4px;">
@@ -305,6 +309,7 @@ function detailPanel(x){
   add('SL', (x.slPrice!=null?fmt(x.pair,x.slPrice):null));
   add('TP', (x.tpPrice!=null?fmt(x.pair,x.tpPrice)+(x.rr!=null?'  ('+Number(x.rr).toFixed(1)+'R)':''):null));
   add('SESSION', x.session);
+  add('4H TREND', x.htfTrend ? (x.htfTrend==='bull'?'▲ Bullish':'▼ Bearish') : null);
   add('CONFLUENCE', (x.confluence!=null? x.confluence+'/7':null));
   const factors = Array.isArray(x.factors)? x.factors : [];
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
@@ -708,6 +713,17 @@ function wireControls(){
     loadSignals(); loadArmed(); loadWatch();
   });
 
+  // TREND filter toggle — reclassify from cache, 0 credits. ON = only arm OBs
+  // aligned with the 4H swing trend (hide counter-trend arms). OFF = arm all.
+  const tfBtn = $('trendFilterBtn');
+  if(tfBtn) tfBtn.addEventListener('click', async function(){
+    const now = tfBtn.getAttribute('data-on') === '1';
+    const next = now ? '0' : '1';
+    await getJSON('/set-settings?trend_filter='+next+'&reclassify=1');
+    setTrendFilterUI(next==='1');
+    loadSignals(); loadArmed(); loadWatch();
+  });
+
   // sync UI with the server's current settings
   syncSettingsUI();
 }
@@ -720,6 +736,14 @@ function setFirstTapUI(on){
   ftBtn.classList.toggle('active', on);
 }
 
+function setTrendFilterUI(on){
+  const tfBtn = document.getElementById('trendFilterBtn');
+  if(!tfBtn) return;
+  tfBtn.setAttribute('data-on', on?'1':'0');
+  tfBtn.textContent = on ? 'WITH TREND' : 'ALL OBS';
+  tfBtn.classList.toggle('active', on);
+}
+
 async function syncSettingsUI(){
   const s = await getJSON('/settings');
   if(!s) return;
@@ -729,6 +753,7 @@ async function syncSettingsUI(){
     b.classList.toggle('active', Number(b.getAttribute('data-arm'))===Number(s.arm_penetration));
   });
   setFirstTapUI(!!s.first_tap_only);
+  setTrendFilterUI(!!s.htf_trend_filter);
 }
 
 wireControls();
