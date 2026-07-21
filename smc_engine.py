@@ -70,6 +70,15 @@ class SMCResult:
     liquidity_sweep: bool = False    # recent sweep of a prior high/low (stop hunt)
     double_tb: bool = False          # double top (bearish) / double bottom (bullish)
     sweep_level: float = None        # the level that was swept
+    # ── per-factor detail levels (for the dashboard "why it fired" breakdown) ──
+    fvg_lo: float = None             # fair value gap zone (low/high edges)
+    fvg_hi: float = None
+    eqhl_level: float = None         # the equal-highs/lows liquidity level
+    eqhl_kind: str = None            # 'EQH' or 'EQL'
+    dbl_a: float = None              # double top/bottom: the two twin levels
+    dbl_b: float = None
+    dbl_ref: float = None            # the pullback trough/peak between them
+    dbl_kind: str = None             # 'Double Top' or 'Double Bottom'
     near_sr: bool = False            # OB sits at a major daily S/R level
     sr_level: float = None           # the major S/R level it aligns with (mid)
     sr_hi: float = None              # S/R channel top
@@ -400,7 +409,7 @@ class SMCEngine:
         """
         n = len(candles)
         if n < 3 or tolerance <= 0:
-            return False
+            return None
         min_gap = tolerance * 0.25          # gap must be at least 1/4 ATR
         near_window = tolerance * 1.5        # and near current price
         lookback = max(3, n - 20)            # only the last ~20 bars
@@ -418,7 +427,7 @@ class SMCEngine:
                         continue
                     filled = any(candles[j].low < gap_bot for j in range(i+1, n))
                     if not filled and abs(near_price - gap_bot) < near_window:
-                        return True
+                        return {'lo': gap_bot, 'hi': c0.low}
             else:
                 if c2.low > c0.high:
                     gap_size = c2.low - c0.high
@@ -427,8 +436,8 @@ class SMCEngine:
                         continue
                     filled = any(candles[j].high > gap_top for j in range(i+1, n))
                     if not filled and abs(near_price - gap_top) < near_window:
-                        return True
-        return False
+                        return {'lo': c0.high, 'hi': gap_top}
+        return None
 
     # ── Equal Highs / Equal Lows (liquidity pools) ──
     def _detect_eqhl(self, candles, bias, near_price, tolerance):
@@ -447,7 +456,7 @@ class SMCEngine:
              not two adjacent bars).
         """
         if tolerance <= 0:
-            return False
+            return None
         highs, lows = self._swing_levels(candles, left=2, right=2)
         # Equal highs/lows are DEFINED by the two levels being nearly identical.
         # Keep this very tight so it means a real double-top/bottom, not just two
@@ -464,8 +473,9 @@ class SMCEngine:
                 if abs(idx_a - idx_b) < 3:
                     continue                      # too close together
                 if abs(lvl_a - lvl_b) < eq_tol and abs(near_price - lvl_a) < near_window:
-                    return True
-        return False
+                    return {'level': (lvl_a + lvl_b) / 2.0,
+                            'kind': 'EQL' if bias == BULLISH else 'EQH'}
+        return None
 
     # ── Liquidity sweep (stop hunt) ──
     def _swing_levels(self, candles, left=2, right=2):
@@ -760,10 +770,18 @@ class SMCEngine:
             )
 
             # Factor 3: FVG supporting the OB direction (check on 15m, near price)
-            result.fvg = self._detect_fvg(candles_15m, hit_ob.bias, price, tol)
+            fvg_d = self._detect_fvg(candles_15m, hit_ob.bias, price, tol)
+            result.fvg = bool(fvg_d)
+            if fvg_d:
+                result.fvg_lo = round(fvg_d['lo'], 5)
+                result.fvg_hi = round(fvg_d['hi'], 5)
 
             # Factor 4: Equal highs/lows liquidity near the zone (on 4H)
-            result.eqhl = self._detect_eqhl(candles_4h, hit_ob.bias, price, tol)
+            eq_d = self._detect_eqhl(candles_4h, hit_ob.bias, price, tol)
+            result.eqhl = bool(eq_d)
+            if eq_d:
+                result.eqhl_level = round(eq_d['level'], 5)
+                result.eqhl_kind = eq_d['kind']
 
             # Factor 5: Liquidity sweep / stop hunt (on 15m for entry timing).
             # Pass the OB edge as zone_ref so only sweeps of liquidity NEAR the
@@ -774,8 +792,14 @@ class SMCEngine:
             result.sweep_level = swept_level
 
             # Factor 6: Double top (bearish) / double bottom (bullish) at the zone
-            result.double_tb = self._detect_double_top_bottom(
+            dbl_d = self._detect_double_top_bottom(
                 candles_15m, hit_ob.bias, price, tol)
+            result.double_tb = bool(dbl_d)
+            if dbl_d:
+                result.dbl_a = round(dbl_d['a'], 5)
+                result.dbl_b = round(dbl_d['b'], 5)
+                result.dbl_ref = round(dbl_d['ref'], 5)
+                result.dbl_kind = dbl_d['kind']
 
             # ── Total confluence score (max 6) ──
             factors = ['4H OB']
@@ -1195,6 +1219,86 @@ class SMCEngine:
 
         return channels
 
+    def detect_aoi(self, candles, pip, min_touches=3, min_w_pips=5.0,
+                   max_w_pips=60.0, lookback_bars=None, pivot_lr=3,
+                   max_zones=8):
+        """
+        Detect 'Area of Interest' horizontal S/R zones (a separate strategy from
+        order blocks). An AOI is a horizontal price band that price has reacted
+        off repeatedly. Rules ported from the AOI strategy:
+          1. Touched >= min_touches times   (distinct swing reactions in the band)
+          2. Band thickness between min_w_pips and max_w_pips
+          3. Run on Daily or Weekly candles only (caller passes the right series)
+          4. Limited lifespan: only pivots within lookback_bars are considered
+             (caller passes ~2yr of daily bars or ~5yr of weekly bars)
+
+        Returns a list of zone dicts, strongest (most touches) first:
+          {'hi','lo','mid','touches','width_pips','age_bars',
+           'first_touch_idx','last_touch_idx'}
+        """
+        n = len(candles)
+        if pip <= 0 or n < pivot_lr * 2 + 2:
+            return []
+        # lifespan window
+        start = max(0, n - lookback_bars) if lookback_bars else 0
+        cs = candles[start:]
+        highs, lows = self._swing_levels(cs, left=pivot_lr, right=pivot_lr)
+        # both swing highs and swing lows count as reactions to a horizontal band
+        piv = [(i, l) for (i, l) in highs] + [(i, l) for (i, l) in lows]
+        if len(piv) < min_touches:
+            return []
+
+        max_w = max_w_pips * pip
+        min_w = min_w_pips * pip
+
+        raw = []
+        for (seed_idx, seed) in piv:
+            lo = hi = seed
+            members = {}
+            for (idx, l) in piv:
+                # grow the band asymmetrically, keeping total width <= max_w
+                wdth = (hi - l) if l <= hi else (l - lo)
+                if wdth <= max_w:
+                    if l <= hi:
+                        lo = min(lo, l)
+                    else:
+                        hi = max(hi, l)
+                    members[idx] = l           # dedupe by pivot index
+            touches = len(members)
+            if touches < min_touches:
+                continue
+            span = hi - lo
+            if span > max_w:                    # too wide -> not an AOI
+                continue
+            if span < min_w:                    # too thin -> pad to the 5-pip min band
+                mid = (hi + lo) / 2.0
+                lo, hi = mid - min_w / 2.0, mid + min_w / 2.0
+                span = hi - lo
+            idxs = sorted(members.keys())
+            raw.append({
+                'hi': hi, 'lo': lo, 'mid': (hi + lo) / 2.0,
+                'touches': touches,
+                'width_pips': round(span / pip, 1),
+                'first_touch_idx': idxs[0] + start,
+                'last_touch_idx': idxs[-1] + start,
+                'age_bars': (n - 1) - (idxs[-1] + start),
+            })
+
+        # strongest first (most touches, then tighter), then drop overlaps
+        raw.sort(key=lambda z: (z['touches'], -(z['hi'] - z['lo'])), reverse=True)
+        kept = []
+        for z in raw:
+            if any(z['lo'] <= k['hi'] and z['hi'] >= k['lo'] for k in kept):
+                continue                        # overlaps a stronger zone already kept
+            kept.append(z)
+            if len(kept) >= max_zones:
+                break
+        for z in kept:
+            z['hi'] = round(z['hi'], 5)
+            z['lo'] = round(z['lo'], 5)
+            z['mid'] = round(z['mid'], 5)
+        return kept
+
     def ob_overlaps_sr(self, ob_low, ob_high, sr_channels):
         """
         Does the 4H OB zone (ob_low..ob_high) overlap any S/R channel?
@@ -1222,7 +1326,7 @@ class SMCEngine:
         For BEARISH we look for a double TOP; for BULLISH, a double BOTTOM.
         """
         if tolerance <= 0:
-            return False
+            return None
         highs, lows = self._swing_levels(candles, left=2, right=2)
         eq_tol = tolerance * 0.10
         near_window = tolerance * 1.5
@@ -1247,12 +1351,14 @@ class SMCEngine:
                 if bias == BEARISH:
                     trough = min(c.low for c in between)
                     if (min(lvl_a, lvl_b) - trough) >= min_pullback:
-                        return True
+                        return {'a': lvl_a, 'b': lvl_b, 'ref': trough,
+                                'kind': 'Double Top'}
                 else:
                     peak = max(c.high for c in between)
                     if (peak - max(lvl_a, lvl_b)) >= min_pullback:
-                        return True
-        return False
+                        return {'a': lvl_a, 'b': lvl_b, 'ref': peak,
+                                'kind': 'Double Bottom'}
+        return None
 
     @staticmethod
     def _pip_size(pair):
