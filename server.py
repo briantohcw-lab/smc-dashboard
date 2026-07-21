@@ -100,6 +100,21 @@ SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '25'))
 # HTF_TREND_FILTER=1 to have it on at boot.
 HTF_TREND_FILTER = os.environ.get('HTF_TREND_FILTER', '0').strip() not in ('0', 'false', 'False')
 
+# ── Area of Interest (AOI) scanner — a SEPARATE strategy from order blocks ──
+# Horizontal S/R zones on Daily & Weekly that price has reacted off repeatedly.
+# These zones barely move, so we refresh them slowly (default once a day) and
+# cache them — toggling Daily/Weekly and checking "is price in a zone" are free.
+AOI_PAIRS = [p.strip() for p in os.environ.get('AOI_PAIRS', '').split(',') if p.strip()]
+AOI_REFRESH_HOURS = float(os.environ.get('AOI_REFRESH_HOURS', '24'))
+AOI_DAILY_BARS   = int(os.environ.get('AOI_DAILY_BARS', '520'))    # ~2yr of daily bars
+AOI_WEEKLY_BARS  = int(os.environ.get('AOI_WEEKLY_BARS', '300'))   # ~5.7yr of weekly bars
+AOI_DAILY_LIFE   = int(os.environ.get('AOI_DAILY_LIFE', '504'))    # daily lifespan ~2yr
+AOI_WEEKLY_LIFE  = int(os.environ.get('AOI_WEEKLY_LIFE', '260'))   # weekly lifespan ~5yr
+AOI_MIN_TOUCHES  = int(os.environ.get('AOI_MIN_TOUCHES', '3'))
+AOI_MIN_PIPS     = float(os.environ.get('AOI_MIN_PIPS', '5'))
+AOI_MAX_PIPS     = float(os.environ.get('AOI_MAX_PIPS', '60'))
+AOI_ENABLED      = os.environ.get('AOI_ENABLED', '1').strip() not in ('0', 'false', 'False')
+
 engine = SMCEngine(swing_length=SWING_LENGTH, internal_length=5,
                    first_tap_only=FIRST_TAP_ONLY,
                    mitigation_window=MIT_WINDOW,
@@ -130,6 +145,19 @@ _lock = threading.Lock()
 # changes can re-classify WITHOUT re-fetching from Twelve Data (0 credits).
 _last_scan_candles = {}          # symbol(with slash) -> (c4, c15, sr_channels)
 _last_scan_lock = threading.Lock()
+
+# ── AOI (Area of Interest) shared state ──
+# Which pairs the AOI scanner covers (defaults to the OB scanner's pairs).
+AOI_SCAN_PAIRS = AOI_PAIRS if AOI_PAIRS else list(PAIRS)
+aoi_zones = {}          # clean pair -> {'daily':[zone...], 'weekly':[zone...], 'price':float}
+aoi_log = {
+    'last_refresh': None, 'refreshing': False, 'progress': 0,
+    'total': 0, 'current': None, 'errors': [], 'last_error': None,
+}
+_aoi_lock = threading.Lock()
+# latest price per clean pair, updated by the OB scanner each cycle; used by the
+# AOI panel to place price against zones live (free — no extra fetch).
+last_prices_global = {}
 
 # Free Twelve Data tier daily limit
 DAILY_CREDIT_LIMIT = int(os.environ.get('DAILY_CREDIT_LIMIT', '800'))
@@ -343,6 +371,15 @@ def scan_once():
             'srLevel':    res.sr_level,
             'srHi':       res.sr_hi,
             'srLo':       res.sr_lo,
+            'sweepLevel': res.sweep_level,
+            'fvgLo':      res.fvg_lo,
+            'fvgHi':      res.fvg_hi,
+            'eqhlLevel':  res.eqhl_level,
+            'eqhlKind':   res.eqhl_kind,
+            'dblA':       res.dbl_a,
+            'dblB':       res.dbl_b,
+            'dblRef':     res.dbl_ref,
+            'dblKind':    res.dbl_kind,
             'confluence': res.confluence,
             'factors':    res.factors,
             'slPrice':    res.sl_price,
@@ -379,6 +416,10 @@ def scan_once():
     with _last_scan_lock:
         _last_scan_candles.clear()
         _last_scan_candles.update(scan_candles)
+
+    # publish latest prices so the AOI panel can place price against its zones
+    # live, without any extra API calls
+    last_prices_global.update(latest_prices)
 
     # sort watchlist by closest first, keep top 12
     watch.sort(key=lambda w: w['distancePips'])
@@ -443,8 +484,14 @@ def scan_once():
 
         # ── AUTO TRACKER: register new signals with their SL/TP ──
         for s in new_signals:
-            sig_id = f"{s.get('pair')}|{s.get('bias')}|{s.get('obLow')}|{s.get('receivedAt')}"
-            exists = any(tr['id'] == sig_id for tr in tracked)
+            # Identity is the SETUP (pair + direction + OB zone), NOT the scan
+            # time. Including receivedAt made every scan re-register the same
+            # ongoing signal as a brand-new position (the duplicate EURCHF /
+            # USDJPY rows). We only add a position if there isn't already an
+            # OPEN one for this exact setup; once it closes, the same zone can
+            # register again later.
+            sig_id = f"{s.get('pair')}|{s.get('bias')}|{s.get('obLow')}"
+            exists = any(tr['id'] == sig_id and tr['outcome'] == 'open' for tr in tracked)
             if not exists and s.get('slPrice') and s.get('tpPrice'):
                 tracked.insert(0, {
                     'id': sig_id,
@@ -563,6 +610,15 @@ def reanalyze_from_cache():
             'srLevel':    res.sr_level,
             'srHi':       res.sr_hi,
             'srLo':       res.sr_lo,
+            'sweepLevel': res.sweep_level,
+            'fvgLo':      res.fvg_lo,
+            'fvgHi':      res.fvg_hi,
+            'eqhlLevel':  res.eqhl_level,
+            'eqhlKind':   res.eqhl_kind,
+            'dblA':       res.dbl_a,
+            'dblB':       res.dbl_b,
+            'dblRef':     res.dbl_ref,
+            'dblKind':    res.dbl_kind,
             'confluence': res.confluence,
             'factors':    res.factors,
             'slPrice':    res.sl_price,
@@ -589,6 +645,21 @@ def reanalyze_from_cache():
             entry['m15needed'] = 'bearish CHoCH' if not ob_bull else 'bullish CHoCH'
             new_armed.append(entry)
 
+    # re-attach any AI read already computed for these setups this scan, WITHOUT
+    # making new API calls (reclassify/filter toggles must stay free).
+    if ai_analysis is not None and getattr(ai_analysis, 'AI_ENABLED', False):
+        for entry in (new_signals + new_armed):
+            try:
+                cached = ai_analysis.get_cached(entry)
+                if cached.get('ok'):
+                    entry['ai'] = {
+                        'label': cached.get('label', ''),
+                        'note':  cached.get('note', ''),
+                        'flags': cached.get('flags', []),
+                    }
+            except Exception:
+                pass
+
     watch.sort(key=lambda w: w['distancePips'])
     watch_top = watch[:12]
 
@@ -597,6 +668,73 @@ def reanalyze_from_cache():
         armed.clear();     armed.extend(new_armed)
         watchlist.clear(); watchlist.extend(watch_top)
     return True
+
+
+# ── AOI scanner: compute Daily & Weekly S/R zones, refresh slowly ──
+def scan_aoi_once():
+    """
+    Fetch Daily + Weekly candles for each AOI pair and compute Area-of-Interest
+    zones (horizontal S/R touched 3+ times, 5-60 pips thick, within lifespan).
+    Runs slowly (default once a day) since these zones barely move. Costs 2
+    Twelve Data credits per pair per refresh.
+    """
+    aoi_log['refreshing'] = True
+    aoi_log['progress'] = 0
+    aoi_log['total'] = len(AOI_SCAN_PAIRS)
+    aoi_log['errors'] = []
+    THROTTLE = float(os.environ.get('API_THROTTLE_SEC', '8'))
+
+    result = {}
+    for idx, symbol in enumerate(AOI_SCAN_PAIRS):
+        aoi_log['current'] = symbol
+        cd = fetch_candles(symbol, '1day', AOI_DAILY_BARS)
+        time.sleep(THROTTLE)
+        cw = fetch_candles(symbol, '1week', AOI_WEEKLY_BARS)
+        time.sleep(THROTTLE)
+        add_credits(2)
+        aoi_log['progress'] = idx + 1
+
+        clean = symbol.replace('/', '')
+        if not cd and not cw:
+            aoi_log['errors'].append(clean)
+            continue
+
+        pip = engine._pip_size(symbol)
+        entry = {'daily': [], 'weekly': [], 'price': None}
+        try:
+            if cd:
+                entry['daily'] = engine.detect_aoi(
+                    cd, pip, min_touches=AOI_MIN_TOUCHES,
+                    min_w_pips=AOI_MIN_PIPS, max_w_pips=AOI_MAX_PIPS,
+                    lookback_bars=AOI_DAILY_LIFE, pivot_lr=3)
+                entry['price'] = round(cd[-1].close, 5)
+            if cw:
+                entry['weekly'] = engine.detect_aoi(
+                    cw, pip, min_touches=AOI_MIN_TOUCHES,
+                    min_w_pips=AOI_MIN_PIPS, max_w_pips=AOI_MAX_PIPS,
+                    lookback_bars=AOI_WEEKLY_LIFE, pivot_lr=2)
+        except Exception as e:
+            aoi_log['last_error'] = f'{clean} aoi error: {e}'
+        result[clean] = entry
+
+    with _aoi_lock:
+        aoi_zones.clear()
+        aoi_zones.update(result)
+    aoi_log['last_refresh'] = datetime.now(timezone.utc).isoformat()
+    aoi_log['refreshing'] = False
+    aoi_log['current'] = None
+
+
+def aoi_loop():
+    # small initial delay so the first AOI burst doesn't collide with the first
+    # OB scan burst on boot
+    time.sleep(45)
+    while True:
+        try:
+            scan_aoi_once()
+        except Exception as e:
+            aoi_log['last_error'] = f'aoi loop error: {e}'
+        time.sleep(max(0.25, AOI_REFRESH_HOURS) * 3600)
 
 
 # ── Background scan loop ──
@@ -684,6 +822,61 @@ def scan_now():
     return jsonify({'status': 'scan triggered'})
 
 
+@app.route('/aoi')
+def get_aoi():
+    """Return cached AOI zones for the requested timeframe (daily|weekly),
+    with each zone placed against the latest known price. Free — no fetch."""
+    tf = request.args.get('tf', 'daily')
+    if tf not in ('daily', 'weekly'):
+        tf = 'daily'
+    out = []
+    with _aoi_lock:
+        items = list(aoi_zones.items())
+    for clean, data in items:
+        price = last_prices_global.get(clean, data.get('price'))
+        pip = engine._pip_size(clean)
+        for z in data.get(tf, []):
+            if price is None:
+                dist, status = None, 'unknown'
+            elif z['lo'] <= price <= z['hi']:
+                dist, status = 0.0, 'in'
+            elif price < z['lo']:
+                dist, status = round((z['lo'] - price) / pip, 1), 'below'
+            else:
+                dist, status = round((price - z['hi']) / pip, 1), 'above'
+            out.append({
+                'pair': clean, 'tf': tf,
+                'hi': z['hi'], 'lo': z['lo'], 'mid': z['mid'],
+                'touches': z['touches'], 'widthPips': z['width_pips'],
+                'ageBars': z['age_bars'], 'price': price,
+                'distancePips': dist, 'status': status,
+            })
+    # in-zone first, then nearest by distance
+    out.sort(key=lambda a: (a['distancePips'] if a['distancePips'] is not None else 9e9))
+    return jsonify({'tf': tf, 'count': len(out), 'zones': out, 'log': aoi_log})
+
+
+@app.route('/aoi-refresh')
+def aoi_refresh():
+    """Manually trigger an AOI recompute (costs credits: 2 per AOI pair)."""
+    if aoi_log.get('refreshing'):
+        return jsonify({'status': 'already refreshing'})
+    threading.Thread(target=scan_aoi_once, daemon=True).start()
+    return jsonify({'status': 'aoi refresh triggered', 'pairs': len(AOI_SCAN_PAIRS)})
+
+
+@app.route('/aoi-status')
+def aoi_status():
+    return jsonify({
+        'enabled': AOI_ENABLED,
+        'pairs': AOI_SCAN_PAIRS,
+        'refresh_hours': AOI_REFRESH_HOURS,
+        'rules': {'min_touches': AOI_MIN_TOUCHES,
+                  'min_pips': AOI_MIN_PIPS, 'max_pips': AOI_MAX_PIPS},
+        'log': aoi_log,
+    })
+
+
 @app.route('/settings')
 def get_settings():
     """Return the current live arming settings (for the dashboard controls)."""
@@ -691,6 +884,7 @@ def get_settings():
         'arm_penetration': engine.arm_penetration,
         'first_tap_only': engine.first_tap_only,
         'htf_trend_filter': engine.htf_trend_filter,
+        'swing_length': engine.swing_length,
     })
 
 
@@ -724,6 +918,14 @@ def set_settings():
         v = tf.strip() not in ('0', 'false', 'False')
         engine.htf_trend_filter = v
         changed['htf_trend_filter'] = v
+    sl = request.args.get('swing_length')
+    if sl is not None:
+        try:
+            v = max(5, min(100, int(sl)))
+            engine.swing_length = v
+            changed['swing_length'] = v
+        except ValueError:
+            return jsonify({'error': 'swing_length must be an integer 5..100'}), 400
     # instant reclassify from cached candles — 0 API credits. This is what the
     # ARM DEPTH / FIRST TAP buttons use so toggling never re-fetches data.
     if request.args.get('reclassify') in ('1', 'true', 'True'):
@@ -735,7 +937,8 @@ def set_settings():
     return jsonify({'status': 'ok', 'changed': changed,
                     'arm_penetration': engine.arm_penetration,
                     'first_tap_only': engine.first_tap_only,
-                    'htf_trend_filter': engine.htf_trend_filter})
+                    'htf_trend_filter': engine.htf_trend_filter,
+                    'swing_length': engine.swing_length})
 
 
 @app.route('/backtest')
@@ -858,6 +1061,9 @@ def backtest():
 if API_KEY:
     t = threading.Thread(target=scan_loop, daemon=True)
     t.start()
+    if AOI_ENABLED:
+        t_aoi = threading.Thread(target=aoi_loop, daemon=True)
+        t_aoi.start()
 else:
     scan_log['last_error'] = 'No TWELVE_DATA_KEY set — add it in Railway Variables'
 
