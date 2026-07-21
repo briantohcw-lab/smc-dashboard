@@ -52,7 +52,10 @@
   .legend-item{display:flex;align-items:center;gap:7px}
   .legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
   section{padding:0 16px}
-  .sec-head{display:flex;align-items:center;gap:10px;padding:18px 0 12px;font-size:11px;letter-spacing:0.16em;color:var(--text2)}
+  .sec-head{display:flex;align-items:center;gap:10px;padding:18px 0 12px;font-size:11px;letter-spacing:0.16em;color:var(--text2);cursor:pointer;user-select:none}
+  .sec-chev{margin-left:10px;font-size:10px;color:var(--text3);transition:transform .15s;flex-shrink:0}
+  section.collapsed .sec-chev{transform:rotate(-90deg)}
+  section.collapsed > *:not(.sec-head){display:none !important}
   .sec-head .bar{width:4px;height:15px;border-radius:2px}
   .sec-count{margin-left:auto;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:2px 9px;font-size:10px;color:var(--text2)}
   .signals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;padding-bottom:6px}
@@ -126,6 +129,60 @@
   .alert-toast.bear{border-color:var(--bear)} .alert-toast.bear .t{color:var(--bear)}
   .sound-toggle{margin-left:auto;font-size:9px;letter-spacing:0.08em;color:var(--text3);
     cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none}
+  /* confluence guide (collapsible) */
+  .conf-guide{margin:0 16px 6px;border:1px solid var(--border);border-radius:8px;background:var(--panel);overflow:hidden}
+  .conf-guide-head{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;
+    font-size:11px;letter-spacing:0.14em;color:var(--text2);user-select:none}
+  .conf-guide-head:hover{color:var(--text)}
+  .conf-guide-head .bar{width:4px;height:14px;border-radius:2px;background:var(--accent)}
+  .conf-guide-head .chev{margin-left:auto;transition:transform 0.2s;color:var(--text3)}
+  .conf-guide.open .conf-guide-head .chev{transform:rotate(90deg)}
+  .conf-guide-body{display:none;padding:2px 14px 10px;border-top:1px solid var(--border)}
+  .conf-guide.open .conf-guide-body{display:block}
+  .cg-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .cg-item:last-child{border-bottom:none}
+  .cg-chip{flex-shrink:0;align-self:flex-start;font-size:9px;letter-spacing:0.04em;
+    padding:4px 8px;border-radius:4px;background:var(--panel2);border:1px solid var(--border2);
+    color:var(--accent);min-width:104px;text-align:center}
+  .cg-text{font-size:12px;line-height:1.55}
+  .cg-def{color:var(--text)} .cg-def b{color:#fff}
+  .cg-why{color:var(--text2);margin-top:3px}
+  .cg-why b{color:var(--warn);font-weight:600}
+  /* per-signal "why it fired" breakdown */
+  .fb-toggle{margin-top:11px;font-size:10px;letter-spacing:0.06em;color:var(--accent);
+    cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:5px}
+  .fb-toggle:hover{text-decoration:underline}
+  .fb-toggle .fbchev{transition:transform .15s;display:inline-block}
+  .fb-toggle.open .fbchev{transform:rotate(90deg)}
+  .fb-panel{display:none;margin-top:8px}
+  .fb-panel.show{display:block}
+  .fb-wrap{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .fb-row{display:flex;gap:10px;justify-content:space-between;align-items:baseline;
+    padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px}
+  .fb-row:last-child{border-bottom:none}
+  .fb-name{color:var(--accent);white-space:nowrap;font-size:10px;letter-spacing:0.04em}
+  .fb-detail{color:var(--text2);text-align:right}
+  .fb-detail b{color:var(--text);font-weight:600}
+  /* AOI panel */
+  .aoi-controls{display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+  .aoi-tf{display:flex;gap:4px}
+  .aoi-refresh{margin-left:auto;font-size:9px;letter-spacing:0.06em;color:var(--text3);
+    cursor:pointer;border:1px solid var(--border2);border-radius:5px;padding:5px 10px;user-select:none}
+  .aoi-refresh:hover{color:var(--text);border-color:var(--accent)}
+  .aoi-note{font-size:9px;color:var(--text3);letter-spacing:0.04em;width:100%}
+  .aoi-row{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);
+    border-left-width:3px;border-radius:7px;margin-bottom:8px;background:var(--panel);font-size:11px;flex-wrap:wrap}
+  .aoi-row.in{border-left-color:var(--warn);background:rgba(240,180,41,0.05)}
+  .aoi-row.above{border-left-color:var(--bear)}
+  .aoi-row.below{border-left-color:var(--bull)}
+  .aoi-band{color:var(--text);font-weight:600}
+  .aoi-meta{font-size:9px;color:var(--text2);letter-spacing:0.03em}
+  .aoi-touch{color:var(--accent)}
+  .aoi-status{margin-left:auto;font-size:9px;letter-spacing:0.06em;padding:3px 8px;border-radius:4px;border:1px solid}
+  .aoi-status.in{color:var(--warn);border-color:var(--warn)}
+  .aoi-status.above{color:var(--bear);border-color:var(--bear)}
+  .aoi-status.below{color:var(--bull);border-color:var(--bull)}
+  .aoi-status.unknown{color:var(--text3);border-color:var(--border2)}
 </style>
 </head>
 <body>
@@ -209,10 +266,80 @@
       <span class="ctrl-lbl">TREND</span>
       <button class="ctrl-btn" id="trendFilterBtn" data-tf="toggle" title="When ON, only arms OBs that agree with the 4H swing trend (hides counter-trend arms)">…</button>
     </div>
+    <div class="ctrl-group">
+      <span class="ctrl-lbl">SWING</span>
+      <button class="ctrl-btn" data-swing="25" title="Finer 4H OB detection — more, smaller zones (matches ~1H structure)">25</button>
+      <button class="ctrl-btn" data-swing="50" title="Coarser 4H OB detection — fewer, larger zones (matches a LuxAlgo chart set to 50)">50</button>
+    </div>
     <div class="sound-toggle" id="soundToggle">🔔 <span id="soundState">SIGNAL ALERTS: ON</span></div>
   </div>
   <div class="arm-note" id="armNote" style="font-size:11px;color:var(--text3);padding:2px 4px 8px 4px;">
     Arming controls apply on the next scan. EDGE = armed the moment price is inside the OB (loosest). Higher % = price must be deeper in the zone (stricter).
+  </div>
+
+  <div class="conf-guide" id="confGuide">
+    <div class="conf-guide-head" id="confGuideToggle">
+      <span class="bar"></span>CONFLUENCE GUIDE — WHAT EACH FACTOR MEANS
+      <span class="chev">&#9656;</span>
+    </div>
+    <div class="conf-guide-body">
+      <div class="cg-item">
+        <span class="cg-chip">4H OB</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>4H Order Block.</b> The zone (the last opposing candle) that caused a 4H structure break — a demand zone before a bullish break, a supply zone before a bearish break.</div>
+          <div class="cg-why"><b>Why:</b> it marks where big orders were likely left behind; price tends to return and react there. This is the base of every setup — price must be inside it to arm.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">15m CHoCH / BOS</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>15m structure aligned.</b> On the 15m, price broke structure the same way as your 4H OB. CHoCH (Change of Character) = the first break against the prior trend; BOS (Break of Structure) = a continuation break with the trend.</div>
+          <div class="cg-why"><b>Why:</b> it confirms lower-timeframe momentum has flipped to agree with your zone — the trigger that turns "price is in a zone" into an actual entry.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">FVG</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Fair Value Gap.</b> A 3-candle imbalance where price moved so fast it left an untouched gap. The engine only counts meaningful, recent gaps near price.</div>
+          <div class="cg-why"><b>Why:</b> gaps act like magnets and support/resistance — an FVG in your direction shows strong one-sided momentum and often gives a precise entry as price fills back into it.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">EQH / EQL</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Equal Highs / Equal Lows.</b> Two or more swing highs (or lows) resting at almost the same level near your zone.</div>
+          <div class="cg-why"><b>Why:</b> equal levels are where stop-losses pile up (resting liquidity). Price is often drawn to sweep them before reversing, which can fuel the move out of your zone.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">Liquidity Sweep</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Liquidity sweep (stop hunt).</b> A candle that spiked through a prior swing high/low to grab stops, then got rejected and closed back on the original side (a long wick).</div>
+          <div class="cg-why"><b>Why:</b> it's smart money grabbing liquidity before reversing. A sweep into your zone is a strong sign the reversal is real, not just price drifting through.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">Double Top / Bottom</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Double top / double bottom.</b> Two swing highs at an equal level (double top, bearish) or two swing lows at an equal level (double bottom, bullish), with a real pullback between them.</div>
+          <div class="cg-why"><b>Why:</b> a classic exhaustion pattern — price tried a level twice and failed, signalling the current move is running out and a reversal in your direction is likely.</div>
+        </div>
+      </div>
+      <div class="cg-item">
+        <span class="cg-chip">Major S/R</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Major support / resistance.</b> Your 4H OB overlaps a strong horizontal S/R band that price has respected many times in history.</div>
+          <div class="cg-why"><b>Why:</b> an OB sitting on a major level is far stronger than one in open space — you have two independent reasons for price to react there.</div>
+        </div>
+      </div>
+      <div class="cg-item" style="border-top:1px solid var(--border2)">
+        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">SCORE / 7</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Confluence score.</b> 4H OB counts as the first point; each extra factor above adds one, up to 7. The dots on each card show the score.</div>
+          <div class="cg-why"><b>Why:</b> more factors stacking in the same direction = a higher-quality setup. Use the CONF filter (2+ / 3+ / 4+) to hide the thin ones.</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="two-col">
@@ -239,6 +366,20 @@
   <section>
     <div class="sec-head"><span class="bar" style="background:var(--accent)"></span>◎ APPROACHING OB — WATCHLIST<span class="sec-count" id="c-watch">0</span></div>
     <div id="watchList"></div>
+  </section>
+
+  <section>
+    <div class="sec-head" style="color:var(--warn)"><span class="bar" style="background:var(--warn)"></span>▚ AREA OF INTEREST — WEEKLY &amp; DAILY S/R<span class="sec-count" id="c-aoi">0</span></div>
+    <div class="aoi-controls">
+      <span class="ctrl-lbl" style="color:var(--text3)">TIMEFRAME</span>
+      <div class="aoi-tf">
+        <button class="ctrl-btn active" data-aoitf="daily">DAILY</button>
+        <button class="ctrl-btn" data-aoitf="weekly">WEEKLY</button>
+      </div>
+      <span class="aoi-refresh" id="aoiRefresh" title="Recompute zones now — costs credits">↻ REFRESH ZONES</span>
+      <div class="aoi-note" id="aoiNote">Zones = horizontal S/R touched 3+ times, 5–60 pips thick, within lifespan. Refreshes daily; switching timeframe is free.</div>
+    </div>
+    <div id="aoiList"></div>
   </section>
 
   <section>
@@ -320,6 +461,7 @@ function detailPanel(x){
   return '<div class="expand-detail">'+
     '<div class="det-grid">'+rows.join('')+'</div>'+
     (factorChips?'<div class="factors">'+factorChips+'</div>':'')+
+    factorBreakdown(x)+
     ai+
     '<div style="margin-top:8px">'+tvButton(x.pair)+'</div>'+
   '</div>';
@@ -373,6 +515,7 @@ function signalCard(x){
       '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/7</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
+    factorBreakdown(x)+
     aiBlock(x)+
   '</div>';
 }
@@ -461,6 +604,57 @@ function openRow(x){
   '</div>';
 }
 
+// ---- per-signal factor breakdown: why each confluence fired, with levels ----
+function factorBreakdown(x){
+  var rows = [];
+  function row(name, detail){
+    rows.push('<div class="fb-row"><span class="fb-name">'+name+'</span>'+
+              '<span class="fb-detail">'+detail+'</span></div>');
+  }
+  var isBull = x.bias==='bull';
+  // 1. 4H OB — the base zone price is reacting to
+  if(x.obLow!=null){
+    row('4H OB', (isBull?'demand':'supply')+' zone <b>'+fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh)+'</b>');
+  }
+  // 2. 15m structure break (+ the 15m OB it left, if any)
+  if(x.m15struct){
+    var z = (x.ltfObLow!=null && x.ltfObHigh!=null)
+      ? ' · left 15m OB <b>'+fmt(x.pair,x.ltfObLow)+'–'+fmt(x.pair,x.ltfObHigh)+'</b>' : '';
+    row('15m '+x.m15struct, 'broke '+(isBull?'up':'down')+z);
+  }
+  // 3. FVG — the imbalance gap
+  if(x.fvg && x.fvgLo!=null){
+    row('FVG', 'unfilled gap <b>'+fmt(x.pair,x.fvgLo)+' – '+fmt(x.pair,x.fvgHi)+'</b>');
+  }
+  // 4. Equal highs/lows — resting liquidity
+  if(x.eqhl && x.eqhlLevel!=null){
+    row(x.eqhlKind||'EQH/EQL', (x.eqhlKind==='EQL'?'equal lows':'equal highs')+' at <b>'+fmt(x.pair,x.eqhlLevel)+'</b>');
+  }
+  // 5. Liquidity sweep — the level that got swept
+  if(x.sweep && x.sweepLevel!=null){
+    row('Liquidity Sweep', 'swept the level at <b>'+fmt(x.pair,x.sweepLevel)+'</b>');
+  }
+  // 6. Double top / bottom — the twin levels + the pullback between
+  if(x.dblKind && x.dblA!=null){
+    var refTxt = (x.dblRef!=null)? ' (pullback '+fmt(x.pair,x.dblRef)+')' : '';
+    row(x.dblKind, 'twin at <b>'+fmt(x.pair,x.dblA)+'</b> &amp; <b>'+fmt(x.pair,x.dblB)+'</b>'+refTxt);
+  }
+  // 7. Major S/R — the channel the OB sits on
+  if(x.nearSr && x.srLo!=null){
+    row('Major S/R', 'respected band <b>'+fmt(x.pair,x.srLo)+' – '+fmt(x.pair,x.srHi)+'</b>');
+  }
+  if(!rows.length) return '';
+  return '<div class="fb-toggle" onclick="toggleFb(this)"><span class="fbchev">&#9656;</span>why these '+
+         rows.length+' fired &amp; at what price</div>'+
+         '<div class="fb-panel"><div class="fb-wrap">'+rows.join('')+'</div></div>';
+}
+
+function toggleFb(el){
+  var p = el.nextElementSibling;
+  if(p && p.classList.contains('fb-panel')) p.classList.toggle('show');
+  el.classList.toggle('open');
+}
+
 function aiBlock(x){
   const ai = x.ai;
   if(!ai || (!ai.note && !ai.label)) return '';
@@ -546,15 +740,66 @@ async function loadWatch(){
   setText('c-watch', data.length);
 }
 
+// ---- AOI (Area of Interest) ----
+var aoiTf = 'daily';
+
+function aoiRow(x){
+  var st = x.status || 'unknown';
+  var stTxt = st==='in' ? 'IN ZONE'
+    : st==='above' ? (Number(x.distancePips).toFixed(1)+' pips above')
+    : st==='below' ? (Number(x.distancePips).toFixed(1)+' pips below')
+    : '—';
+  var band = fmt(x.pair,x.lo)+' – '+fmt(x.pair,x.hi);
+  // age: bars are daily or weekly candles depending on tf
+  var ageUnit = x.tf==='weekly' ? 'wk' : 'd';
+  return '<div class="aoi-row '+st+'">'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="aoi-band">'+band+'</span>'+
+    '<span class="aoi-meta aoi-touch">'+safe(x.touches,0)+' touches</span>'+
+    '<span class="aoi-meta">'+Number(safe(x.widthPips,0)).toFixed(1)+' pips wide</span>'+
+    '<span class="aoi-meta">last touch '+safe(x.ageBars,0)+ageUnit+' ago</span>'+
+    tvButton(x.pair)+
+    '<span class="aoi-status '+st+'">'+stTxt+'</span>'+
+  '</div>';
+}
+
+async function loadAoi(){
+  const data = await getJSON('/aoi?tf='+aoiTf);
+  const el=$('aoiList');
+  if(!data || !Array.isArray(data.zones)){
+    if(el) el.innerHTML = '<div class="empty">NO AOI DATA YET<div class="sub">ZONES REFRESH DAILY…</div></div>';
+    setText('c-aoi', 0);
+    return;
+  }
+  const zones = data.zones;
+  if(el) el.innerHTML = zones.length? zones.map(aoiRow).join('')
+      : '<div class="empty">NO '+aoiTf.toUpperCase()+' AOI ZONES<div class="sub">3+ touches, 5–60 pips…</div></div>';
+  setText('c-aoi', zones.length);
+  // reflect refresh state in the note
+  var note=$('aoiNote'), log=data.log||{};
+  if(note){
+    if(log.refreshing){
+      note.textContent = 'Refreshing zones… '+(log.progress||0)+'/'+(log.total||0)+(log.current?(' — '+log.current):'');
+    } else if(log.last_refresh){
+      note.textContent = 'Zones from '+String(log.last_refresh).replace('T',' ').slice(0,16)+' UTC · switching timeframe is free · refresh recomputes (costs credits).';
+    }
+  }
+}
+
 async function loadTracker(){
   const data = await getJSON('/tracker');
   if(!data) return;
   const positions = Array.isArray(data.positions)? data.positions : [];
   const open = positions.filter(function(p){return p.outcome==='open';});
+  // one row per currency pair (keep the most recent = first), capped to a few
+  const seen = {}, deduped = [];
+  open.forEach(function(p){ if(!seen[p.pair]){ seen[p.pair]=1; deduped.push(p); } });
+  const MAX_OPEN = 8;
+  const shown = deduped.slice(0, MAX_OPEN);
   const el=$('openList');
-  if(el) el.innerHTML = open.length? open.map(openRow).join('')
+  if(el) el.innerHTML = shown.length? shown.map(openRow).join('')
       : '<div class="empty">NO OPEN TRADES<div class="sub">TRACKER ARMS WHEN A SIGNAL FIRES…</div></div>';
-  setText('c-open', open.length);
+  setText('c-open', deduped.length);
 }
 
 async function loadHistory(){
@@ -629,7 +874,7 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory() ]);
+  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi() ]);
 }
 
 // ---- signal alert (toast + optional beep) ----
@@ -724,8 +969,62 @@ function wireControls(){
     loadSignals(); loadArmed(); loadWatch();
   });
 
+  // SWING length buttons — re-DETECT 4H OBs at 25 vs 50 on the last scan's
+  // candles. Reclassify path = 0 API credits. 50 matches a LuxAlgo chart set
+  // to 50 (fewer, larger OBs); 25 detects finer structure (more OBs).
+  document.querySelectorAll('.ctrl-btn[data-swing]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      const v = btn.getAttribute('data-swing');
+      document.querySelectorAll('.ctrl-btn[data-swing]').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      const note = $('armNote');
+      if(note) note.textContent = 'Re-detecting 4H OBs at swing '+v+' on the last scan… (0 credits)';
+      await getJSON('/set-settings?swing_length='+v+'&reclassify=1');
+      loadSignals(); loadArmed(); loadWatch();
+      if(note) setTimeout(function(){ note.textContent = 'SWING sets 4H OB detection length. 50 = matches a LuxAlgo chart set to 50 (fewer, larger OBs). 25 = finer structure (more, smaller OBs, closer to 1H).'; }, 4500);
+    });
+  });
+
   // sync UI with the server's current settings
   syncSettingsUI();
+
+  // collapsible confluence guide
+  var cgToggle = document.getElementById('confGuideToggle');
+  if(cgToggle) cgToggle.addEventListener('click', function(){
+    var g = document.getElementById('confGuide');
+    if(g) g.classList.toggle('open');
+  });
+
+  // make every section header collapsible (minimize/expand its window)
+  document.querySelectorAll('.sec-head').forEach(function(h){
+    if(h.querySelector('.sec-chev')) return;
+    var chev = document.createElement('span');
+    chev.className = 'sec-chev';
+    chev.innerHTML = '&#9662;';   // ▾
+    h.appendChild(chev);
+    h.addEventListener('click', function(){
+      var sec = h.closest('section');
+      if(sec) sec.classList.toggle('collapsed');
+    });
+  });
+
+  // AOI timeframe toggle (Daily/Weekly) — free, just re-reads cached zones
+  document.querySelectorAll('.ctrl-btn[data-aoitf]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      aoiTf = btn.getAttribute('data-aoitf');
+      document.querySelectorAll('.ctrl-btn[data-aoitf]').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      loadAoi();
+    });
+  });
+  // AOI manual refresh (costs credits — recomputes Daily+Weekly zones)
+  var aoiRef = document.getElementById('aoiRefresh');
+  if(aoiRef) aoiRef.addEventListener('click', async function(){
+    var note=$('aoiNote');
+    if(note) note.textContent = 'Refresh triggered — recomputing Daily & Weekly zones (this costs credits)…';
+    await getJSON('/aoi-refresh');
+    setTimeout(loadAoi, 1500);
+  });
 }
 
 function setFirstTapUI(on){
@@ -754,6 +1053,9 @@ async function syncSettingsUI(){
   });
   setFirstTapUI(!!s.first_tap_only);
   setTrendFilterUI(!!s.htf_trend_filter);
+  document.querySelectorAll('.ctrl-btn[data-swing]').forEach(function(b){
+    b.classList.toggle('active', Number(b.getAttribute('data-swing'))===Number(s.swing_length));
+  });
 }
 
 wireControls();
