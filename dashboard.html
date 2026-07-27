@@ -183,6 +183,72 @@
   .aoi-status.above{color:var(--bear);border-color:var(--bear)}
   .aoi-status.below{color:var(--bull);border-color:var(--bull)}
   .aoi-status.unknown{color:var(--text3);border-color:var(--border2)}
+  /* daily S/R line on cards */
+  .daily-sr{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;
+    padding-top:10px;border-top:1px solid var(--border);font-size:10px}
+  .dsr-lbl{font-size:8px;letter-spacing:0.1em;color:var(--text3);margin-right:2px}
+  .dsr-sep{color:var(--border2)}
+  /* trade journal */
+  .jr-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+  .jr-form input,.jr-form select{background:var(--panel2);border:1px solid var(--border2);
+    color:var(--text);border-radius:5px;padding:6px 8px;font-size:11px;
+    font-family:inherit;width:92px}
+  .jr-form input::placeholder{color:var(--text3)}
+  .jr-form input.wide{width:150px}
+  .jr-btn{font-size:10px;letter-spacing:0.06em;padding:7px 14px;border-radius:5px;
+    border:1px solid var(--accent);background:var(--accent);color:#04111f;
+    font-weight:700;cursor:pointer}
+  .jr-btn.ghost{background:transparent;color:var(--text2);border-color:var(--border2);font-weight:400}
+  .jr-btn.ghost:hover{color:var(--text);border-color:var(--accent)}
+  .jr-warn{font-size:10px;color:var(--warn);letter-spacing:0.03em;padding:8px 10px;
+    border:1px solid rgba(240,180,41,0.35);background:rgba(240,180,41,0.06);
+    border-radius:6px;margin-bottom:10px}
+  .jr-kpis{display:flex;flex-wrap:wrap;gap:14px;padding:10px 12px;border:1px solid var(--border);
+    border-radius:7px;background:var(--panel);margin-bottom:10px;font-size:11px}
+  .jr-kpi b{font-size:15px;display:block;line-height:1.3}
+  .jr-kpi span{font-size:8px;letter-spacing:0.1em;color:var(--text3)}
+  .jr-tbl{border:1px solid var(--border);border-radius:7px;overflow:hidden;margin-bottom:12px}
+  .jr-tbl-h{padding:8px 11px;font-size:9px;letter-spacing:0.12em;color:var(--text2);
+    background:var(--panel2);border-bottom:1px solid var(--border)}
+  .jr-tr{display:flex;gap:8px;align-items:center;padding:7px 11px;
+    border-bottom:1px solid var(--border);font-size:11px}
+  .jr-tr:last-child{border-bottom:none}
+  .jr-k{flex:1;color:var(--text)}
+  .jr-n{color:var(--text3);font-size:10px;min-width:34px}
+  .jr-wr{min-width:52px;text-align:right}
+  .jr-r{min-width:60px;text-align:right;font-weight:600}
+  /* trailing stop plan */
+  .trail-plan{margin-top:10px;padding:10px;border-radius:6px;
+    background:rgba(63,214,139,0.05);border:1px solid rgba(63,214,139,0.22)}
+  .tp-head{display:flex;align-items:center;gap:8px;font-size:9px;letter-spacing:0.1em;
+    color:var(--bull);margin-bottom:8px}
+  .tp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
+  .tp-cell .l{font-size:8px;letter-spacing:0.08em;color:var(--text3);margin-bottom:2px}
+  .tp-cell .v{font-size:12px;color:var(--text);font-weight:600}
+  .tp-cell .v small{font-weight:400;color:var(--text3);font-size:9px}
+  .tp-warn{margin-top:8px;font-size:9px;color:var(--warn);letter-spacing:0.02em}
+  .tp-steps{margin-top:8px;font-size:10px;color:var(--text2);line-height:1.6}
+  .tp-steps b{color:var(--text)}
+  .risk-box{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:9px;
+    letter-spacing:0.06em;color:var(--text3)}
+  .risk-box input{background:var(--panel2);border:1px solid var(--border2);color:var(--text);
+    border-radius:5px;padding:5px 8px;font-size:11px;font-family:inherit;width:74px}
+  /* screenshot drop zone */
+  .drop-zone{border:1px dashed var(--border2);border-radius:8px;padding:18px 14px;
+    text-align:center;color:var(--text3);font-size:11px;letter-spacing:0.06em;
+    cursor:pointer;margin-bottom:10px;transition:border-color .15s,background .15s}
+  .drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:rgba(88,166,255,0.06);color:var(--text2)}
+  .drop-zone .big{font-size:13px;color:var(--accent);margin-bottom:4px}
+  .drop-zone .sub{font-size:9px;color:var(--text3);margin-top:5px;letter-spacing:0.03em}
+  .stage-card{border:1px solid var(--warn);border-left-width:3px;border-radius:7px;
+    padding:11px 13px;margin-bottom:8px;background:rgba(240,180,41,0.05);font-size:11px}
+  .stage-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+  .stage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:7px;margin-bottom:9px}
+  .stage-grid .l{font-size:8px;letter-spacing:0.08em;color:var(--text3)}
+  .stage-grid .v{font-size:11px;color:var(--text)}
+  .stage-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .stage-acts input{background:var(--panel2);border:1px solid var(--border2);color:var(--text);
+    border-radius:4px;padding:4px 7px;font-size:10px;font-family:inherit;width:84px}
 </style>
 </head>
 <body>
@@ -272,6 +338,7 @@
       <button class="ctrl-btn" data-swing="50" title="Coarser 4H OB detection — fewer, larger zones (matches a LuxAlgo chart set to 50)">50</button>
     </div>
     <div class="sound-toggle" id="soundToggle">🔔 <span id="soundState">SIGNAL ALERTS: ON</span></div>
+    <div class="risk-box">RISK/TRADE $<input id="riskInput" value="250" title="Your dollar risk per trade — used to size positions against the structural stop"></div>
   </div>
   <div class="arm-note" id="armNote" style="font-size:11px;color:var(--text3);padding:2px 4px 8px 4px;">
     Arming controls apply on the next scan. EDGE = armed the moment price is inside the OB (loosest). Higher % = price must be deeper in the zone (stricter).
@@ -383,6 +450,44 @@
   </section>
 
   <section>
+    <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▤ DAILY S/R LEVELS<span class="sec-count" id="c-dsr">0</span></div>
+    <div class="aoi-note" style="padding:0 4px 8px 4px">Broader daily support/resistance bands (looser than AOI). Green = support below price, red = resistance above. Refreshes daily.</div>
+    <div id="dailySrList"></div>
+  </section>
+
+  <section>
+    <div class="sec-head" style="color:var(--bull)"><span class="bar" style="background:var(--bull)"></span>✎ TRADE JOURNAL — WHAT ACTUALLY WORKS<span class="sec-count" id="c-jr">0</span></div>
+    <div class="aoi-note" style="padding:0 4px 8px 4px">Log your REAL fills (not the auto-tracker). Stats below show which conditions actually made money. Suggested SL pips = what the signal card recommended, so you can see if tightening stops hurts you.</div>
+    <div class="drop-zone" id="jrDrop">
+      <div class="big">⇪ DROP / PASTE MT5 SCREENSHOT</div>
+      tap to choose an image · or paste with Ctrl+V
+      <div class="sub">Claude reads the trade details, then you confirm before it's saved. Pending orders are ignored.</div>
+      <input type="file" id="jrFile" accept="image/*" style="display:none">
+    </div>
+    <div id="jrStage"></div>
+    <div class="jr-form">
+      <input id="jrPair" placeholder="PAIR" style="width:80px">
+      <select id="jrDir"><option value="long">LONG</option><option value="short">SHORT</option></select>
+      <input id="jrEntry" placeholder="entry">
+      <input id="jrSl" placeholder="stop loss">
+      <input id="jrTp" placeholder="take profit">
+      <input id="jrExit" placeholder="exit price">
+      <select id="jrSession"><option value="">session…</option><option>Asian</option><option>London</option><option>NY</option></select>
+      <input id="jrConf" placeholder="conf /7" style="width:70px">
+      <input id="jrSug" placeholder="sug SL pips" style="width:96px">
+      <input id="jrMfe" placeholder="max fav pips" style="width:100px" title="How far the trade ran in your favour before reversing — the key diagnostic">
+      <input id="jrFactors" class="wide" placeholder="factors (comma)">
+      <input id="jrOpened" class="wide" placeholder="opened YYYY-MM-DD HH:MM">
+      <input id="jrClosed" class="wide" placeholder="closed YYYY-MM-DD HH:MM">
+      <input id="jrNotes" class="wide" placeholder="notes">
+      <button class="jr-btn" id="jrAdd">+ LOG TRADE</button>
+      <button class="jr-btn ghost" id="jrExport">⭳ EXPORT BACKUP</button>
+    </div>
+    <div id="jrStats"></div>
+    <div id="jrList"></div>
+  </section>
+
+  <section>
     <div class="sec-head"><span class="bar" style="background:var(--text3)"></span>⊛ HISTORY — 2+ CONFLUENCE (LAST 10)<span class="sec-count" id="c-hist">0</span></div>
     <div id="histList"></div>
   </section>
@@ -461,6 +566,8 @@ function detailPanel(x){
   return '<div class="expand-detail">'+
     '<div class="det-grid">'+rows.join('')+'</div>'+
     (factorChips?'<div class="factors">'+factorChips+'</div>':'')+
+    dailySrLine(x)+
+    trailPlan(x)+
     factorBreakdown(x)+
     ai+
     '<div style="margin-top:8px">'+tvButton(x.pair)+'</div>'+
@@ -515,6 +622,8 @@ function signalCard(x){
       '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/7</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
+    dailySrLine(x)+
+    trailPlan(x)+
     factorBreakdown(x)+
     aiBlock(x)+
   '</div>';
@@ -602,6 +711,79 @@ function openRow(x){
     (cur!=null?'<span class="mini" style="color:var(--text)">now '+fmt(x.pair,cur)+'</span>':'')+
     '<span class="push-right mini" style="color:'+progColor+'">'+progTxt+'</span>'+
   '</div>';
+}
+
+// ---- trailing stop plan (structural stop, +1R activation, trail, sizing) ----
+var riskPerTrade = 250;
+
+function pipSize(pair){
+  var p = String(pair||'').toUpperCase();
+  if(p.indexOf('JPY')>=0) return 0.01;
+  if(p.indexOf('XAU')>=0) return 0.10;
+  return 0.0001;
+}
+// approx USD value of 1 pip per 1.00 standard lot
+function pipValueUsd(pair){
+  var p = String(pair||'').toUpperCase();
+  if(p.indexOf('XAU')>=0) return 10;      // gold, per 0.10 move
+  if(p.indexOf('JPY')>=0) return 6.6;     // ~1000 JPY at ~150 USDJPY
+  return 10;                              // USD-quoted majors
+}
+
+function trailPlan(x){
+  if(x.slPrice==null || x.price==null) return '';
+  var pip = pipSize(x.pair);
+  var isBull = x.bias==='bull';
+  var entry = Number(x.price), sl = Number(x.slPrice);
+  var riskPips = Math.abs(entry - sl) / pip;
+  if(!(riskPips > 0)) return '';
+
+  // +1R activation, then trail by 0.5R
+  var actPrice = isBull ? entry + riskPips*pip : entry - riskPips*pip;
+  var trailPips = riskPips * 0.5;
+  // lots for the user's dollar risk against the STRUCTURAL stop
+  var lots = riskPerTrade / (riskPips * pipValueUsd(x.pair));
+  var lotTxt = lots >= 0.1 ? lots.toFixed(2) : lots.toFixed(3);
+
+  function cell(l,v,sub){
+    return '<div class="tp-cell"><div class="l">'+l+'</div><div class="v">'+v+
+           (sub?' <small>'+sub+'</small>':'')+'</div></div>';
+  }
+
+  return '<div class="trail-plan">'+
+    '<div class="tp-head">◈ TRAILING PLAN <span style="margin-left:auto;color:var(--text3);letter-spacing:0">structural stop · trail after +1R</span></div>'+
+    '<div class="tp-grid">'+
+      cell('STRUCTURAL SL', fmt(x.pair,sl), riskPips.toFixed(1)+'p') +
+      cell('ACTIVATE AT', fmt(x.pair,actPrice), '+1R') +
+      cell('TRAIL BY', trailPips.toFixed(1)+'p', '0.5R') +
+      cell('SIZE @ $'+riskPerTrade, lotTxt+' lots', 'approx') +
+    '</div>'+
+    '<div class="tp-steps">'+
+      '<b>1.</b> Enter with the full structural stop at '+fmt(x.pair,sl)+' — not tighter. '+
+      '<b>2.</b> Leave it alone until price reaches '+fmt(x.pair,actPrice)+'. '+
+      '<b>3.</b> Then trail '+trailPips.toFixed(1)+'p behind, or behind each 15m swing.'+
+    '</div>'+
+    '<div class="tp-warn">⚠ Sizing is approximate (assumes ~$'+pipValueUsd(x.pair)+'/pip per lot). Verify lot size in your platform before trading.</div>'+
+  '</div>';
+}
+
+// ---- daily S/R context line for a signal/armed card ----
+function dailySrLine(x){
+  var parts = [];
+  if(x.dailyAtLo!=null){
+    parts.push('<span style="color:var(--warn)">in daily S/R '+fmt(x.pair,x.dailyAtLo)+'–'+fmt(x.pair,x.dailyAtHi)+'</span>');
+  }
+  if(x.dailyResLo!=null){
+    parts.push('<span style="color:var(--bear)">R '+fmt(x.pair,x.dailyResLo)+'–'+fmt(x.pair,x.dailyResHi)+
+      (x.dailyResPips!=null?' ('+Number(x.dailyResPips).toFixed(1)+'p)':'')+'</span>');
+  }
+  if(x.dailySupLo!=null){
+    parts.push('<span style="color:var(--bull)">S '+fmt(x.pair,x.dailySupLo)+'–'+fmt(x.pair,x.dailySupHi)+
+      (x.dailySupPips!=null?' ('+Number(x.dailySupPips).toFixed(1)+'p)':'')+'</span>');
+  }
+  if(!parts.length) return '';
+  return '<div class="daily-sr"><span class="dsr-lbl">DAILY S/R</span>'+
+    parts.join('<span class="dsr-sep">·</span>')+'</div>';
 }
 
 // ---- per-signal factor breakdown: why each confluence fired, with levels ----
@@ -740,6 +922,268 @@ async function loadWatch(){
   setText('c-watch', data.length);
 }
 
+// ---- Daily S/R levels panel ----
+function dailySrRow(x){
+  var st = x.status || 'unknown';
+  var cls = st==='in' ? 'in' : st==='support' ? 'below' : st==='resistance' ? 'above' : 'unknown';
+  var stTxt = st==='in' ? 'PRICE IN BAND'
+    : st==='support'    ? (Number(x.distancePips).toFixed(1)+'p below · support')
+    : st==='resistance' ? (Number(x.distancePips).toFixed(1)+'p above · resistance')
+    : '—';
+  return '<div class="aoi-row '+cls+'">'+
+    '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
+    '<span class="aoi-band">'+fmt(x.pair,x.lo)+' – '+fmt(x.pair,x.hi)+'</span>'+
+    '<span class="aoi-meta">strength '+safe(x.strength,'—')+'</span>'+
+    tvButton(x.pair)+
+    '<span class="aoi-status '+cls+'">'+stTxt+'</span>'+
+  '</div>';
+}
+
+async function loadDailySr(){
+  const data = await getJSON('/daily-sr');
+  const el=$('dailySrList');
+  if(!data || !Array.isArray(data.levels)){
+    if(el) el.innerHTML = '<div class="empty">NO DAILY S/R YET<div class="sub">REFRESHES DAILY…</div></div>';
+    setText('c-dsr', 0);
+    return;
+  }
+  const lv = data.levels;
+  if(el) el.innerHTML = lv.length? lv.map(dailySrRow).join('')
+      : '<div class="empty">NO DAILY S/R BANDS<div class="sub">REFRESHES DAILY…</div></div>';
+  setText('c-dsr', lv.length);
+}
+
+// ---- screenshot -> trade parsing (review before saving) ----
+var jrStaged = [];
+
+function jrStageRender(){
+  var el = $('jrStage');
+  if(!el) return;
+  if(!jrStaged.length){ el.innerHTML=''; return; }
+  el.innerHTML = jrStaged.map(function(t,i){
+    function c(l,v){ return '<div><div class="l">'+l+'</div><div class="v">'+(v==null||v===''?'—':v)+'</div></div>'; }
+    var dirCol = (t.dir==='long')?'var(--bull)':'var(--bear)';
+    var pcol = (t.profit==null)?'var(--text3)':(t.profit>0?'var(--bull)':'var(--bear)');
+    return '<div class="stage-card">'+
+      '<div class="stage-top">'+
+        '<span class="pair-cell">'+safe(t.pair,'—')+'</span>'+
+        '<span class="mini" style="color:'+dirCol+'">'+(t.dir==='long'?'▲ LONG':'▼ SHORT')+'</span>'+
+        (t.volume!=null?'<span class="mini" style="color:var(--text2)">'+t.volume+' lots</span>':'')+
+        (t.session?'<span class="sess-tag" style="color:var(--text3);border-color:var(--border2)">'+t.session+'</span>':'')+
+        '<span class="push-right mini" style="color:'+pcol+';font-weight:600">'+(t.profit!=null?(t.profit>0?'+':'')+t.profit:'')+'</span>'+
+      '</div>'+
+      '<div class="stage-grid">'+
+        c('ENTRY',t.entry)+c('EXIT',t.exit)+c('S/L',t.sl)+c('T/P',t.tp)+
+        c('OPENED',t.openedAt)+c('CLOSED',t.closedAt)+
+      '</div>'+
+      '<div class="stage-acts">'+
+        '<input placeholder="conf /7" id="stConf'+i+'">'+
+        '<input placeholder="sug SL pips" id="stSug'+i+'">'+
+        '<input placeholder="max fav pips" id="stMfe'+i+'">'+
+        '<input placeholder="factors" id="stFac'+i+'" style="width:130px">'+
+        '<button class="jr-btn" onclick="jrConfirm('+i+')">✓ CONFIRM &amp; LOG</button>'+
+        '<button class="jr-btn ghost" onclick="jrDiscard('+i+')">✕ DISCARD</button>'+
+      '</div>'+
+      '<div style="margin-top:6px;font-size:9px;color:var(--warn)">⚠ Check these numbers against your platform before confirming.</div>'+
+    '</div>';
+  }).join('');
+}
+
+async function jrConfirm(i){
+  var t = jrStaged[i];
+  if(!t) return;
+  var q=[];
+  function add(k,v){ if(v!==undefined&&v!==null&&String(v).trim()!=='') q.push(k+'='+encodeURIComponent(String(v).trim())); }
+  add('pair',t.pair); add('dir',t.dir);
+  add('entry',t.entry); add('sl',t.sl); add('tp',t.tp); add('exit',t.exit);
+  add('openedAt',jrIso(t.openedAt)); add('closedAt',jrIso(t.closedAt));
+  add('session',t.session);
+  var cf=$('stConf'+i), sg=$('stSug'+i), fc=$('stFac'+i);
+  if(cf&&cf.value) add('confluence',cf.value);
+  if(sg&&sg.value) add('sugSlPips',sg.value);
+  var mf=$('stMfe'+i); if(mf&&mf.value) add('mfePips',mf.value);
+  if(fc&&fc.value) add('factors',fc.value);
+  await getJSON('/journal-add?'+q.join('&'));
+  jrStaged.splice(i,1);
+  jrStageRender();
+  loadJournal();
+}
+
+function jrDiscard(i){ jrStaged.splice(i,1); jrStageRender(); }
+
+async function jrParseImage(file){
+  if(!file) return;
+  var el=$('jrStage');
+  if(el) el.innerHTML='<div class="empty">READING SCREENSHOT…<div class="sub">CLAUDE IS EXTRACTING TRADE DETAILS…</div></div>';
+  var b64 = await new Promise(function(res,rej){
+    var r=new FileReader();
+    r.onload=function(){ res(String(r.result).split(',')[1]); };
+    r.onerror=rej;
+    r.readAsDataURL(file);
+  });
+  var mt = file.type || 'image/jpeg';
+  try{
+    var resp = await fetch(API+'/journal-parse', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({image:b64, media_type:mt})
+    });
+    var d = await resp.json();
+    if(!d.ok){
+      if(el) el.innerHTML='<div class="empty">COULD NOT READ IT<div class="sub">'+safe(d.error,'unknown error')+'</div></div>';
+      return;
+    }
+    if(!d.trades || !d.trades.length){
+      if(el) el.innerHTML='<div class="empty">NO CLOSED TRADES FOUND<div class="sub">PENDING ORDERS ARE SKIPPED…</div></div>';
+      return;
+    }
+    jrStaged = jrStaged.concat(d.trades);
+    jrStageRender();
+  }catch(e){
+    if(el) el.innerHTML='<div class="empty">PARSE FAILED<div class="sub">'+String(e).slice(0,80)+'</div></div>';
+  }
+}
+
+// ---- Trade journal ----
+function jrTable(title, rows, note){
+  if(!rows || !rows.length) return '';
+  var body = rows.map(function(g){
+    var wr = (g.winRate==null)? '—' : g.winRate+'%';
+    var wrCol = (g.winRate==null)? 'var(--text3)' : (g.winRate>=50?'var(--bull)':'var(--bear)');
+    var tr = (g.totalR==null)? '—' : (g.totalR>0?'+':'')+g.totalR+'R';
+    var trCol = (g.totalR==null)? 'var(--text3)' : (g.totalR>0?'var(--bull)':g.totalR<0?'var(--bear)':'var(--text3)');
+    return '<div class="jr-tr">'+
+      '<span class="jr-k">'+g.key+'</span>'+
+      '<span class="jr-n">n='+g.n+'</span>'+
+      '<span class="jr-n">'+g.wins+'W/'+g.losses+'L</span>'+
+      '<span class="jr-wr" style="color:'+wrCol+'">'+wr+'</span>'+
+      '<span class="jr-r" style="color:'+trCol+'">'+tr+'</span>'+
+    '</div>';
+  }).join('');
+  return '<div class="jr-tbl"><div class="jr-tbl-h">'+title+(note?' <span style="color:var(--text3);letter-spacing:0">· '+note+'</span>':'')+'</div>'+body+'</div>';
+}
+
+// ---- MFE diagnosis: is it an ENTRY problem or an EXIT problem? ----
+function mfeDiagnosis(d){
+  if(!d || !d.n) return '<div class="jr-warn">Log <b>max fav pips</b> on your trades to unlock the entry-vs-exit diagnosis.</div>';
+  var lines = [];
+  lines.push('<div class="jr-tr"><span class="jr-k">Never reached +1R <span style="color:var(--text3)">— entry/stop problem</span></span><span class="jr-r" style="color:'+(d.neverWorked?'var(--bear)':'var(--text3)')+'">'+d.neverWorked+'</span></div>');
+  lines.push('<div class="jr-tr"><span class="jr-k">Ran 1.5R+ but kept &lt;60% <span style="color:var(--text3)">— exit problem</span></span><span class="jr-r" style="color:'+(d.gaveBack?'var(--warn)':'var(--text3)')+'">'+d.gaveBack+'</span></div>');
+  lines.push('<div class="jr-tr"><span class="jr-k">Captured most of the move <span style="color:var(--text3)">— clean</span></span><span class="jr-r" style="color:'+(d.cleanCapture?'var(--bull)':'var(--text3)')+'">'+d.cleanCapture+'</span></div>');
+  if(d.rLeftOnTable>0) lines.push('<div class="jr-tr"><span class="jr-k">R left on the table by early exits</span><span class="jr-r" style="color:var(--warn)">'+d.rLeftOnTable+'R</span></div>');
+  if(d.avgMfeR!=null) lines.push('<div class="jr-tr"><span class="jr-k">Average max favourable move</span><span class="jr-r">'+d.avgMfeR+'R</span></div>');
+
+  // plain-English verdict
+  var verdict='', vcol='var(--text2)';
+  if(d.neverWorked > d.gaveBack && d.neverWorked >= 2){
+    verdict='Most losses never reached +1R. That points at the ENTRY or a too-tight stop — a trailing stop would NOT have saved these. Widen the initial stop (and cut lot size to keep risk the same).';
+    vcol='var(--bear)';
+  } else if(d.gaveBack > d.neverWorked && d.gaveBack >= 2){
+    verdict='Most trades ran well then gave it back. That is an EXIT problem — this is exactly what trailing stops and partial take-profits fix. Trail after +1R, or bank half at 2R.';
+    vcol='var(--warn)';
+  } else if(d.n < 8){
+    verdict='Not enough data to call it yet. Keep logging max-fav pips on every trade.';
+  } else {
+    verdict='Mixed — no single dominant failure mode yet.';
+  }
+  return '<div class="jr-tbl"><div class="jr-tbl-h">⌖ ENTRY PROBLEM vs EXIT PROBLEM <span style="color:var(--text3);letter-spacing:0">· from max favourable excursion</span></div>'+
+    lines.join('')+'</div>'+
+    '<div class="jr-warn" style="color:'+vcol+';border-color:'+vcol+'">'+verdict+'</div>';
+}
+
+async function loadJournal(){
+  const s = await getJSON('/journal-stats');
+  const el = $('jrStats');
+  if(!s || !s.closed){
+    if(el) el.innerHTML = '<div class="empty">NO TRADES LOGGED YET<div class="sub">LOG YOUR FILLS TO BUILD REAL STATS…</div></div>';
+  } else {
+    var wrCol = (s.winRate!=null && s.winRate>=50)?'var(--bull)':'var(--bear)';
+    var trCol = (s.totalR>0)?'var(--bull)':(s.totalR<0?'var(--bear)':'var(--text3)');
+    var kpis = '<div class="jr-kpis">'+
+      '<div class="jr-kpi"><b style="color:'+wrCol+'">'+(s.winRate==null?'—':s.winRate+'%')+'</b><span>WIN RATE</span></div>'+
+      '<div class="jr-kpi"><b style="color:'+trCol+'">'+((s.totalR>0?'+':'')+s.totalR)+'R</b><span>TOTAL R</span></div>'+
+      '<div class="jr-kpi"><b>'+s.avgR+'R</b><span>AVG R</span></div>'+
+      '<div class="jr-kpi"><b>'+s.closed+'</b><span>CLOSED</span></div>'+
+      '<div class="jr-kpi"><b style="color:var(--bull)">'+s.wins+'</b><span>WINS</span></div>'+
+      '<div class="jr-kpi"><b style="color:var(--bear)">'+s.losses+'</b><span>LOSSES</span></div>'+
+      '<div class="jr-kpi"><b style="color:var(--text3)">'+s.scratch+'</b><span>SCRATCH</span></div>'+
+    '</div>';
+    var warn = s.sampleWarning
+      ? '<div class="jr-warn">⚠ Only '+s.closed+' closed trades. Below ~30 these splits are mostly noise — read them as hints, not rules. Keep logging.</div>'
+      : '';
+    var tables =
+      mfeDiagnosis(s.diagnosis)+
+      jrTable('BY MAX FAVOURABLE MOVE', s.byMfe, 'how far it ran before reversing')+
+      jrTable('BY STOP WIDTH vs SUGGESTED', s.byStopWidth, 'is tightening stops costing you?')+
+      jrTable('BY HOLD TIME', s.byHoldTime)+
+      jrTable('BY SESSION', s.bySession)+
+      jrTable('BY CONFLUENCE SCORE', s.byConfluence)+
+      jrTable('BY DIRECTION', s.byDirection)+
+      jrTable('BY PAIR', s.byPair)+
+      jrTable('BY CONFLUENCE FACTOR', s.byFactor, 'which factors actually pay');
+    if(el) el.innerHTML = warn + kpis + tables;
+  }
+  // recent trades list
+  const d = await getJSON('/journal');
+  const lst = $('jrList');
+  if(d && Array.isArray(d.trades)){
+    setText('c-jr', d.count);
+    var rows = d.trades.slice(0,15).map(function(t){
+      var rCol = (t.r==null)?'var(--text3)':(t.r>0.05?'var(--bull)':(t.r<-0.05?'var(--bear)':'var(--text3)'));
+      var rTxt = (t.r==null)?'open':((t.r>0?'+':'')+t.r+'R');
+      var dirCol = (t.dir==='long')?'var(--bull)':'var(--bear)';
+      return '<div class="watch-row">'+
+        '<span class="pair-cell">'+safe(t.pair,'—')+'</span>'+
+        '<span class="mini" style="color:'+dirCol+'">'+(t.dir==='long'?'▲ LONG':'▼ SHORT')+'</span>'+
+        '<span class="mini" style="color:var(--text2)">@ '+fmt(t.pair,t.entry)+'</span>'+
+        (t.exit!=null?'<span class="mini" style="color:var(--text2)">→ '+fmt(t.pair,t.exit)+'</span>':'')+
+        (t.session?'<span class="sess-tag" style="color:var(--text3);border-color:var(--border2)">'+t.session+'</span>':'')+
+        (t.confluence!=null?'<span class="mini" style="color:var(--warn)">'+t.confluence+'/7</span>':'')+
+        '<span class="push-right" style="color:'+rCol+';font-weight:600">'+rTxt+'</span>'+
+        '<span class="mini" style="color:var(--text3);cursor:pointer" onclick="jrDelete(\''+t.id+'\')">✕</span>'+
+      '</div>';
+    }).join('');
+    if(lst) lst.innerHTML = rows || '';
+  }
+}
+
+async function jrDelete(id){
+  await getJSON('/journal-delete?id='+encodeURIComponent(id));
+  loadJournal();
+}
+
+function jrIso(v){
+  // accept "YYYY-MM-DD HH:MM" and turn it into an ISO timestamp
+  v = (v||'').trim();
+  if(!v) return '';
+  return v.replace(' ','T') + (v.length<=16 ? ':00+00:00' : '');
+}
+
+async function jrAddTrade(){
+  var q = [];
+  function add(k,v){ if(v!==undefined && v!==null && String(v).trim()!=='') q.push(k+'='+encodeURIComponent(String(v).trim())); }
+  var pair = ($('jrPair')||{}).value;
+  if(!pair){ alert('Pair is required'); return; }
+  add('pair',pair);
+  add('dir',($('jrDir')||{}).value);
+  add('entry',($('jrEntry')||{}).value);
+  add('sl',($('jrSl')||{}).value);
+  add('tp',($('jrTp')||{}).value);
+  add('exit',($('jrExit')||{}).value);
+  add('session',($('jrSession')||{}).value);
+  add('confluence',($('jrConf')||{}).value);
+  add('sugSlPips',($('jrSug')||{}).value);
+  add('mfePips',($('jrMfe')||{}).value);
+  add('factors',($('jrFactors')||{}).value);
+  add('openedAt',jrIso(($('jrOpened')||{}).value));
+  add('closedAt',jrIso(($('jrClosed')||{}).value));
+  add('notes',($('jrNotes')||{}).value);
+  await getJSON('/journal-add?'+q.join('&'));
+  ['jrEntry','jrSl','jrTp','jrExit','jrConf','jrSug','jrMfe','jrFactors','jrOpened','jrClosed','jrNotes'].forEach(function(id){
+    var e=$(id); if(e) e.value='';
+  });
+  loadJournal();
+}
+
 // ---- AOI (Area of Interest) ----
 var aoiTf = 'daily';
 
@@ -874,7 +1318,7 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi() ]);
+  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal() ]);
 }
 
 // ---- signal alert (toast + optional beep) ----
@@ -1006,6 +1450,56 @@ function wireControls(){
       var sec = h.closest('section');
       if(sec) sec.classList.toggle('collapsed');
     });
+  });
+
+  // risk-per-trade input -> resizes all trailing plans
+  var rIn=document.getElementById('riskInput');
+  if(rIn) rIn.addEventListener('change', function(){
+    var v=parseFloat(rIn.value);
+    if(v>0){ riskPerTrade=v; loadSignals(); loadArmed(); }
+  });
+
+  // screenshot drop zone: click, drag-drop, and paste
+  var dz=document.getElementById('jrDrop'), fi=document.getElementById('jrFile');
+  if(dz && fi){
+    dz.addEventListener('click', function(){ fi.click(); });
+    fi.addEventListener('change', function(){
+      if(fi.files && fi.files[0]) jrParseImage(fi.files[0]);
+      fi.value='';
+    });
+    ['dragenter','dragover'].forEach(function(ev){
+      dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.remove('drag'); });
+    });
+    dz.addEventListener('drop', function(e){
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(f) jrParseImage(f);
+    });
+    document.addEventListener('paste', function(e){
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      for(var i=0;i<items.length;i++){
+        if(items[i].type && items[i].type.indexOf('image')===0){
+          jrParseImage(items[i].getAsFile());
+          break;
+        }
+      }
+    });
+  }
+
+  // trade journal buttons
+  var jrA=document.getElementById('jrAdd');
+  if(jrA) jrA.addEventListener('click', jrAddTrade);
+  var jrE=document.getElementById('jrExport');
+  if(jrE) jrE.addEventListener('click', async function(){
+    var d = await getJSON('/journal-export');
+    if(!d) return;
+    var blob = new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='smc_journal_backup.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   });
 
   // AOI timeframe toggle (Daily/Weekly) — free, just re-reads cached zones
