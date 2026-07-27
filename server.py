@@ -115,6 +115,13 @@ AOI_MIN_PIPS     = float(os.environ.get('AOI_MIN_PIPS', '5'))
 AOI_MAX_PIPS     = float(os.environ.get('AOI_MAX_PIPS', '60'))
 AOI_ENABLED      = os.environ.get('AOI_ENABLED', '1').strip() not in ('0', 'false', 'False')
 
+# ── Daily S/R channels (broader than AOI) — computed from the SAME daily
+# candles the AOI pass already fetches, so no extra credits. Uses the engine's
+# SRchannel algorithm (the one behind the 'Major S/R' chip), run on Daily.
+DAILY_SR_MAX      = int(os.environ.get('DAILY_SR_MAX', '6'))
+DAILY_SR_MINSTR   = int(os.environ.get('DAILY_SR_MIN_STRENGTH', '2'))
+DAILY_SR_WPCT     = float(os.environ.get('DAILY_SR_WIDTH_PCT', '4'))
+
 engine = SMCEngine(swing_length=SWING_LENGTH, internal_length=5,
                    first_tap_only=FIRST_TAP_ONLY,
                    mitigation_window=MIT_WINDOW,
@@ -158,6 +165,272 @@ _aoi_lock = threading.Lock()
 # latest price per clean pair, updated by the OB scanner each cycle; used by the
 # AOI panel to place price against zones live (free — no extra fetch).
 last_prices_global = {}
+
+
+def _nearest_daily_sr(clean, price):
+    """Nearest daily support (band below price), resistance (band above), and
+    the band price is currently inside, from the cached daily S/R channels.
+    Read-only, no API calls — used to annotate signal cards."""
+    with _aoi_lock:
+        data = aoi_zones.get(clean)
+        bands = list(data.get('sr_daily', [])) if data else []
+    if not bands or price is None:
+        return {}
+    pip = engine._pip_size(clean) or 0.0001
+    sup = res = inband = None
+    for b in bands:
+        if b['lo'] <= price <= b['hi']:
+            inband = b
+        elif b['hi'] < price:
+            if sup is None or b['hi'] > sup['hi']:
+                sup = b
+        elif b['lo'] > price:
+            if res is None or b['lo'] < res['lo']:
+                res = b
+    out = {}
+    if inband:
+        out['dailyAtLo'] = inband['lo']; out['dailyAtHi'] = inband['hi']
+    if sup:
+        out['dailySupLo'] = sup['lo']; out['dailySupHi'] = sup['hi']
+        out['dailySupPips'] = round((price - sup['hi']) / pip, 1)
+    if res:
+        out['dailyResLo'] = res['lo']; out['dailyResHi'] = res['hi']
+        out['dailyResPips'] = round((res['lo'] - price) / pip, 1)
+    return out
+
+
+def _attach_daily_sr(entry):
+    """Augment a signal/armed entry with nearest daily S/R levels (free)."""
+    try:
+        entry.update(_nearest_daily_sr(entry.get('pair'), entry.get('price')))
+    except Exception:
+        pass
+
+
+# ── TRADE JOURNAL: log REAL trades + analyse what actually works ──
+# The auto-tracker is feed-based and crude. This is your actual fills, with the
+# signal context attached, so win-rate stats mean something. Stored as JSON.
+# NOTE: Railway's disk is ephemeral across redeploys — use /journal-export to
+# back up, /journal-import to restore.
+JOURNAL_FILE = os.environ.get('JOURNAL_FILE', '/tmp/smc_journal.json')
+journal = []
+_journal_lock = threading.Lock()
+
+
+def _load_journal():
+    global journal
+    try:
+        with open(JOURNAL_FILE) as f:
+            data = json.load(f)
+        journal = data if isinstance(data, list) else []
+    except Exception:
+        journal = []
+
+
+def _save_journal():
+    try:
+        with open(JOURNAL_FILE, 'w') as f:
+            json.dump(journal, f)
+    except Exception:
+        pass
+
+
+def _r_multiple(t):
+    """Realised R multiple: profit distance / original risk distance."""
+    try:
+        e, sl, x = float(t['entry']), float(t['sl']), float(t['exit'])
+    except (TypeError, ValueError, KeyError):
+        return None
+    risk = abs(e - sl)
+    if risk <= 0:
+        return None
+    move = (x - e) if t.get('dir') == 'long' else (e - x)
+    return round(move / risk, 2)
+
+
+def _mfe_r(t):
+    """Max favorable excursion expressed in R — how far the trade ran in your
+    favour, as a multiple of the initial risk. The key diagnostic:
+      MFE < 1R  -> the trade never worked; the entry or the stop was the problem
+      MFE > 2R but small realised R -> you gave profit back; a trailing/partial
+                                       exit problem, not an entry problem."""
+    try:
+        e, sl = float(t['entry']), float(t['sl'])
+        mfe = float(t['mfePips'])
+    except (TypeError, ValueError, KeyError):
+        return None
+    pu = str(t.get('pair', '')).upper()
+    pip = 0.01 if 'JPY' in pu else (0.10 if 'XAU' in pu else 0.0001)
+    risk_pips = abs(e - sl) / pip
+    if risk_pips <= 0 or mfe < 0:
+        return None
+    return round(mfe / risk_pips, 2)
+
+
+def _giveback_diagnosis(closed):
+    """Split closed trades into the two failure modes, using MFE vs realised R.
+    Returns a dict the dashboard renders as a plain-English verdict."""
+    never, gave, clean = [], [], []
+    for t in closed:
+        m, r = t.get('mfeR'), t.get('r')
+        if m is None or r is None:
+            continue
+        if m < 1.0:
+            never.append(t)             # never reached +1R -> entry/stop problem
+        elif m >= 1.5 and r < m * 0.6:
+            gave.append(t)              # ran far, kept little -> exit problem
+        else:
+            clean.append(t)
+    n = len(never) + len(gave) + len(clean)
+    if n == 0:
+        return {'n': 0}
+    left = sum((t['mfeR'] - t['r']) for t in gave) if gave else 0.0
+    mfes = [t['mfeR'] for t in closed if t.get('mfeR') is not None]
+    return {
+        'n': n,
+        'neverWorked': len(never),
+        'gaveBack': len(gave),
+        'cleanCapture': len(clean),
+        'rLeftOnTable': round(left, 2),
+        'avgMfeR': round(sum(mfes) / len(mfes), 2) if mfes else None,
+    }
+
+
+def _bucket_stats(trades, keyfn):
+    """Group trades by keyfn and compute win rate / avg R / total R."""
+    groups = {}
+    for t in trades:
+        k = keyfn(t)
+        if k is None or k == '':
+            continue
+        groups.setdefault(str(k), []).append(t)
+    out = []
+    for k, ts in groups.items():
+        rs = [t['r'] for t in ts if t.get('r') is not None]
+        wins = sum(1 for t in ts if (t.get('r') or 0) > 0.05)
+        losses = sum(1 for t in ts if (t.get('r') or 0) < -0.05)
+        scratch = len(ts) - wins - losses
+        out.append({
+            'key': k, 'n': len(ts), 'wins': wins, 'losses': losses,
+            'scratch': scratch,
+            'winRate': round(100 * wins / (wins + losses)) if (wins + losses) else None,
+            'avgR': round(sum(rs) / len(rs), 2) if rs else None,
+            'totalR': round(sum(rs), 2) if rs else None,
+        })
+    out.sort(key=lambda g: (g['totalR'] if g['totalR'] is not None else -9e9), reverse=True)
+    return out
+
+
+def _journal_stats():
+    with _journal_lock:
+        ts = [dict(t) for t in journal]
+    closed = []
+    for t in ts:
+        if t.get('exit') in (None, ''):
+            continue
+        t['r'] = _r_multiple(t)
+        t['mfeR'] = _mfe_r(t)
+        closed.append(t)
+    if not closed:
+        return {'n': 0, 'closed': 0, 'note': 'no closed trades logged yet'}
+
+    rs = [t['r'] for t in closed if t.get('r') is not None]
+    wins = [t for t in closed if (t.get('r') or 0) > 0.05]
+    losses = [t for t in closed if (t.get('r') or 0) < -0.05]
+    scratch = len(closed) - len(wins) - len(losses)
+    wr = round(100 * len(wins) / (len(wins) + len(losses))) if (wins or losses) else None
+
+    def stop_bucket(t):
+        """How wide was the stop vs what the engine suggested?"""
+        try:
+            used = abs(float(t['entry']) - float(t['sl']))
+            sug = t.get('sugSlPips')
+            pip = 0.01 if 'JPY' in str(t.get('pair', '')).upper() else 0.0001
+            used_p = used / pip
+            if not sug:
+                return None
+            ratio = used_p / float(sug)
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            return None
+        if ratio < 0.5:
+            return 'much tighter than suggested (<50%)'
+        if ratio < 0.9:
+            return 'tighter than suggested (50-90%)'
+        if ratio <= 1.15:
+            return 'as suggested (~structural)'
+        return 'wider than suggested (>115%)'
+
+    def hold_bucket(t):
+        try:
+            a = datetime.fromisoformat(t['openedAt'].replace('Z', '+00:00'))
+            b = datetime.fromisoformat(t['closedAt'].replace('Z', '+00:00'))
+        except Exception:
+            return None
+        h = (b - a).total_seconds() / 3600.0
+        if h < 4:
+            return '< 4 hours'
+        if h < 24:
+            return '4-24 hours'
+        if h < 72:
+            return '1-3 days'
+        return '> 3 days'
+
+    def conf_bucket(t):
+        c = t.get('confluence')
+        if c is None:
+            return None
+        c = int(c)
+        return '5+ confluence' if c >= 5 else ('4 confluence' if c == 4 else '<=3 confluence')
+
+    factor_stats = {}
+    for t in closed:
+        for f in (t.get('factors') or []):
+            factor_stats.setdefault(f, []).append(t)
+    by_factor = []
+    for f, fts in factor_stats.items():
+        frs = [x['r'] for x in fts if x.get('r') is not None]
+        w = sum(1 for x in fts if (x.get('r') or 0) > 0.05)
+        l = sum(1 for x in fts if (x.get('r') or 0) < -0.05)
+        by_factor.append({'key': f, 'n': len(fts), 'wins': w, 'losses': l,
+                          'winRate': round(100 * w / (w + l)) if (w + l) else None,
+                          'avgR': round(sum(frs) / len(frs), 2) if frs else None,
+                          'totalR': round(sum(frs), 2) if frs else None})
+    by_factor.sort(key=lambda g: (g['totalR'] if g['totalR'] is not None else -9e9), reverse=True)
+
+    def mfe_bucket(t):
+        m = t.get('mfeR')
+        if m is None:
+            return None
+        if m < 0.5:
+            return 'never ran (<0.5R) — entry/stop issue'
+        if m < 1.0:
+            return 'ran 0.5-1R — stop likely too tight'
+        if m < 2.0:
+            return 'ran 1-2R'
+        return 'ran 2R+ — was there to be taken'
+
+    return {
+        'n': len(ts), 'closed': len(closed),
+        'wins': len(wins), 'losses': len(losses), 'scratch': scratch,
+        'winRate': wr,
+        'avgR': round(sum(rs) / len(rs), 2) if rs else None,
+        'totalR': round(sum(rs), 2) if rs else None,
+        'bestR': round(max(rs), 2) if rs else None,
+        'worstR': round(min(rs), 2) if rs else None,
+        'diagnosis': _giveback_diagnosis(closed),
+        'byMfe': _bucket_stats(closed, mfe_bucket),
+        'bySession': _bucket_stats(closed, lambda t: t.get('session')),
+        'byConfluence': _bucket_stats(closed, conf_bucket),
+        'byDirection': _bucket_stats(closed, lambda t: t.get('dir')),
+        'byPair': _bucket_stats(closed, lambda t: t.get('pair')),
+        'byStopWidth': _bucket_stats(closed, stop_bucket),
+        'byHoldTime': _bucket_stats(closed, hold_bucket),
+        'byFactor': by_factor,
+        'sampleWarning': len(closed) < 30,
+    }
+
+
+_load_journal()
 
 # Free Twelve Data tier daily limit
 DAILY_CREDIT_LIMIT = int(os.environ.get('DAILY_CREDIT_LIMIT', '800'))
@@ -401,6 +674,7 @@ def scan_once():
             'receivedAt': datetime.now(timezone.utc).isoformat(),
         }
 
+        _attach_daily_sr(entry)
         if struct_aligned:
             # full confluence signal — price in OB AND 15m confirmed
             new_signals.append(entry)
@@ -639,6 +913,7 @@ def reanalyze_from_cache():
             'ltfObLow':   res.ltf_ob_low,
             'receivedAt': datetime.now(timezone.utc).isoformat(),
         }
+        _attach_daily_sr(entry)
         if struct_aligned:
             new_signals.append(entry)
         else:
@@ -700,7 +975,7 @@ def scan_aoi_once():
             continue
 
         pip = engine._pip_size(symbol)
-        entry = {'daily': [], 'weekly': [], 'price': None}
+        entry = {'daily': [], 'weekly': [], 'sr_daily': [], 'price': None}
         try:
             if cd:
                 entry['daily'] = engine.detect_aoi(
@@ -708,6 +983,14 @@ def scan_aoi_once():
                     min_w_pips=AOI_MIN_PIPS, max_w_pips=AOI_MAX_PIPS,
                     lookback_bars=AOI_DAILY_LIFE, pivot_lr=3)
                 entry['price'] = round(cd[-1].close, 5)
+                # broader daily S/R channels from the same daily candles
+                try:
+                    entry['sr_daily'] = engine.detect_sr_channels(
+                        cd, prd=10, loopback=min(len(cd), 365),
+                        channel_w_pct=DAILY_SR_WPCT, min_strength=DAILY_SR_MINSTR,
+                        max_sr=DAILY_SR_MAX)
+                except Exception:
+                    entry['sr_daily'] = []
             if cw:
                 entry['weekly'] = engine.detect_aoi(
                     cw, pip, min_touches=AOI_MIN_TOUCHES,
@@ -875,6 +1158,170 @@ def aoi_status():
                   'min_pips': AOI_MIN_PIPS, 'max_pips': AOI_MAX_PIPS},
         'log': aoi_log,
     })
+
+
+@app.route('/journal-parse', methods=['POST'])
+def journal_parse():
+    """
+    Parse a broker-history screenshot into trade fields for review.
+    POST JSON: {"image": "<base64>", "media_type": "image/jpeg"}
+    Returns {'ok':True,'trades':[...]} — does NOT save anything. The dashboard
+    shows these for confirmation, then calls /journal-add.
+    """
+    if ai_analysis is None or not getattr(ai_analysis, 'AI_ENABLED', False):
+        return jsonify({'ok': False,
+                        'error': 'AI not enabled — set ANTHROPIC_API_KEY in Railway'}), 400
+    body = request.get_json(silent=True) or {}
+    b64 = body.get('image')
+    if not b64:
+        return jsonify({'ok': False, 'error': 'no image supplied'}), 400
+    if len(b64) > 8_000_000:
+        return jsonify({'ok': False, 'error': 'image too large (max ~6MB)'}), 400
+
+    res = ai_analysis.parse_trade_screenshot(b64, body.get('media_type', 'image/jpeg'))
+    if not res.get('ok'):
+        return jsonify(res), 200
+
+    # enrich: derive the session from the OPEN time so stats stay consistent
+    for t in res['trades']:
+        try:
+            if t.get('openedAt'):
+                dt = datetime.fromisoformat(t['openedAt'].replace(' ', 'T'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                t['session'] = engine._session_for(int(dt.timestamp()))
+        except Exception:
+            t['session'] = None
+    return jsonify(res)
+
+
+@app.route('/journal')
+def journal_list():
+    with _journal_lock:
+        ts = [dict(t) for t in journal]
+    for t in ts:
+        t['r'] = _r_multiple(t) if t.get('exit') not in (None, '') else None
+    ts.sort(key=lambda t: str(t.get('openedAt') or ''), reverse=True)
+    return jsonify({'trades': ts, 'count': len(ts)})
+
+
+@app.route('/journal-add')
+def journal_add():
+    """Log a real trade. Query params:
+       pair, dir(long|short), entry, sl, tp, exit, openedAt, closedAt,
+       session, confluence, factors(comma), sugSlPips, notes, outcome
+    """
+    a = request.args
+    pair = (a.get('pair') or '').strip().upper().replace('/', '')
+    if not pair:
+        return jsonify({'error': 'pair required'}), 400
+
+    def num(k):
+        v = a.get(k)
+        try:
+            return float(v) if v not in (None, '') else None
+        except ValueError:
+            return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    t = {
+        'id': f"{pair}-{int(time.time()*1000)}",
+        'pair': pair,
+        'dir': 'long' if (a.get('dir') or 'long').lower().startswith('l') else 'short',
+        'entry': num('entry'), 'sl': num('sl'), 'tp': num('tp'), 'exit': num('exit'),
+        'openedAt': a.get('openedAt') or now,
+        'closedAt': a.get('closedAt') or (now if num('exit') is not None else None),
+        'session': (a.get('session') or '').strip() or None,
+        'confluence': int(a['confluence']) if (a.get('confluence') or '').isdigit() else None,
+        'factors': [f.strip() for f in (a.get('factors') or '').split(',') if f.strip()],
+        'sugSlPips': num('sugSlPips'),
+        'mfePips': num('mfePips'),
+        'outcome': (a.get('outcome') or '').strip() or None,
+        'notes': (a.get('notes') or '').strip() or None,
+        'loggedAt': now,
+    }
+    with _journal_lock:
+        journal.insert(0, t)
+        while len(journal) > 1000:
+            journal.pop()
+        _save_journal()
+    return jsonify({'status': 'ok', 'trade': t})
+
+
+@app.route('/journal-delete')
+def journal_delete():
+    tid = request.args.get('id')
+    if not tid:
+        return jsonify({'error': 'id required'}), 400
+    with _journal_lock:
+        before = len(journal)
+        journal[:] = [t for t in journal if t.get('id') != tid]
+        _save_journal()
+        removed = before - len(journal)
+    return jsonify({'status': 'ok', 'removed': removed})
+
+
+@app.route('/journal-stats')
+def journal_stats_route():
+    return jsonify(_journal_stats())
+
+
+@app.route('/journal-export')
+def journal_export():
+    with _journal_lock:
+        return jsonify({'trades': journal, 'count': len(journal)})
+
+
+@app.route('/journal-import', methods=['GET', 'POST'])
+def journal_import():
+    """Restore a journal backup. POST a JSON body {"trades":[...]} or pass
+    ?data=<urlencoded json>. Replaces the current journal."""
+    payload = None
+    if request.method == 'POST':
+        payload = request.get_json(silent=True)
+    if payload is None and request.args.get('data'):
+        try:
+            payload = json.loads(request.args['data'])
+        except Exception:
+            return jsonify({'error': 'bad json in data param'}), 400
+    if not payload:
+        return jsonify({'error': 'no data'}), 400
+    trades = payload.get('trades') if isinstance(payload, dict) else payload
+    if not isinstance(trades, list):
+        return jsonify({'error': 'expected a list of trades'}), 400
+    with _journal_lock:
+        journal[:] = trades
+        _save_journal()
+    return jsonify({'status': 'ok', 'count': len(trades)})
+
+
+@app.route('/daily-sr')
+def get_daily_sr():
+    """Return cached broad daily S/R channels per pair, each placed against the
+    latest known price (support = band below price, resistance = above). Free."""
+    out = []
+    with _aoi_lock:
+        items = list(aoi_zones.items())
+    for clean, data in items:
+        bands = data.get('sr_daily', [])
+        price = last_prices_global.get(clean, data.get('price'))
+        pip = engine._pip_size(clean)
+        for b in bands:
+            if price is None:
+                dist, status = None, 'unknown'
+            elif b['lo'] <= price <= b['hi']:
+                dist, status = 0.0, 'in'
+            elif b['hi'] < price:
+                dist, status = round((price - b['hi']) / pip, 1), 'support'
+            else:
+                dist, status = round((b['lo'] - price) / pip, 1), 'resistance'
+            out.append({
+                'pair': clean, 'hi': b['hi'], 'lo': b['lo'],
+                'strength': b.get('strength'), 'price': price,
+                'distancePips': dist, 'status': status,
+            })
+    out.sort(key=lambda a: (a['pair'], a['distancePips'] if a['distancePips'] is not None else 9e9))
+    return jsonify({'levels': out, 'count': len(out), 'log': aoi_log})
 
 
 @app.route('/settings')
