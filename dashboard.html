@@ -188,6 +188,15 @@
     padding-top:10px;border-top:1px solid var(--border);font-size:10px}
   .dsr-lbl{font-size:8px;letter-spacing:0.1em;color:var(--text3);margin-right:2px}
   .dsr-sep{color:var(--border2)}
+  /* PRIME location badge — 4H OB sitting on a daily/weekly S/R level */
+  .prime-badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;
+    letter-spacing:0.1em;padding:4px 9px;border-radius:5px;font-weight:700;
+    background:linear-gradient(135deg,rgba(240,180,41,0.22),rgba(240,180,41,0.08));
+    border:1px solid var(--warn);color:var(--warn)}
+  .card.prime{border-color:var(--warn);box-shadow:0 0 0 1px rgba(240,180,41,0.25)}
+  .prime-line{margin-top:10px;padding:9px 10px;border-radius:6px;font-size:10px;
+    background:rgba(240,180,41,0.07);border:1px solid rgba(240,180,41,0.3);color:var(--text2)}
+  .prime-line b{color:var(--warn)}
   /* trade journal */
   .jr-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
   .jr-form input,.jr-form select{background:var(--panel2);border:1px solid var(--border2);
@@ -294,7 +303,7 @@
     <div class="legend-item"><span class="legend-dot" style="background:var(--bull)"></span>4H Bullish OB + 15m align ↑</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--bear)"></span>4H Bearish OB + 15m align ↓</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--warn)"></span>High confluence 3+</div>
-    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /7</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /9</div>
   </div>
 
   <div class="controls">
@@ -399,10 +408,17 @@
           <div class="cg-why"><b>Why:</b> an OB sitting on a major level is far stronger than one in open space — you have two independent reasons for price to react there.</div>
         </div>
       </div>
-      <div class="cg-item" style="border-top:1px solid var(--border2)">
-        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">SCORE / 7</span>
+      <div class="cg-item">
+        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">Daily / Weekly S/R</span>
         <div class="cg-text">
-          <div class="cg-def"><b>Confluence score.</b> 4H OB counts as the first point; each extra factor above adds one, up to 7. The dots on each card show the score.</div>
+          <div class="cg-def"><b>Higher-timeframe location.</b> The 4H order block overlaps a support/resistance band built from <b>daily</b> or <b>weekly</b> candles — a level the market has respected for months, not hours.</div>
+          <div class="cg-why"><b>Why:</b> an OB is only as good as where it sits. A zone in open space has one reason to hold; a zone on a weekly level has two independent ones. When price is inside that band too, the card is flagged <b>★ PRIME LOCATION</b> — the 4H setup and the higher-timeframe level agree, which is the strongest version of this setup.</div>
+        </div>
+      </div>
+      <div class="cg-item" style="border-top:1px solid var(--border2)">
+        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">SCORE / 9</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Confluence score.</b> 4H OB counts as the first point; each extra factor above adds one, up to 9. The dots on each card show the score.</div>
           <div class="cg-why"><b>Why:</b> more factors stacking in the same direction = a higher-quality setup. Use the CONF filter (2+ / 3+ / 4+) to hide the thin ones.</div>
         </div>
       </div>
@@ -451,7 +467,7 @@
 
   <section>
     <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▤ DAILY S/R LEVELS<span class="sec-count" id="c-dsr">0</span></div>
-    <div class="aoi-note" style="padding:0 4px 8px 4px">Broader daily support/resistance bands (looser than AOI). Green = support below price, red = resistance above. Refreshes daily.</div>
+    <div class="aoi-note" id="dsrNote" style="padding:0 4px 8px 4px">Nearest daily wall each way, one row per pair.</div>
     <div id="dailySrList"></div>
   </section>
 
@@ -473,7 +489,7 @@
       <input id="jrTp" placeholder="take profit">
       <input id="jrExit" placeholder="exit price">
       <select id="jrSession"><option value="">session…</option><option>Asian</option><option>London</option><option>NY</option></select>
-      <input id="jrConf" placeholder="conf /7" style="width:70px">
+      <input id="jrConf" placeholder="conf /9" style="width:70px">
       <input id="jrSug" placeholder="sug SL pips" style="width:96px">
       <input id="jrMfe" placeholder="max fav pips" style="width:100px" title="How far the trade ran in your favour before reversing — the key diagnostic">
       <input id="jrFactors" class="wide" placeholder="factors (comma)">
@@ -556,7 +572,7 @@ function detailPanel(x){
   add('TP', (x.tpPrice!=null?fmt(x.pair,x.tpPrice)+(x.rr!=null?'  ('+Number(x.rr).toFixed(1)+'R)':''):null));
   add('SESSION', x.session);
   add('4H TREND', x.htfTrend ? (x.htfTrend==='bull'?'▲ Bullish':'▼ Bearish') : null);
-  add('CONFLUENCE', (x.confluence!=null? x.confluence+'/7':null));
+  add('CONFLUENCE', (x.confluence!=null? x.confluence+'/9':null));
   const factors = Array.isArray(x.factors)? x.factors : [];
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
   let ai='';
@@ -567,6 +583,7 @@ function detailPanel(x){
     '<div class="det-grid">'+rows.join('')+'</div>'+
     (factorChips?'<div class="factors">'+factorChips+'</div>':'')+
     dailySrLine(x)+
+    primeLine(x)+
     trailPlan(x)+
     factorBreakdown(x)+
     ai+
@@ -588,7 +605,7 @@ function signalCard(x){
   const factors = Array.isArray(x.factors)? x.factors : [];
   const zone = fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh);
   let dots='';
-  for(let i=1;i<=7;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
+  for(let i=1;i<=9;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
   const sl = (x.slPrice!=null)? fmt(x.pair,x.slPrice) : '—';
   const tp = (x.tpPrice!=null)? fmt(x.pair,x.tpPrice) : '—';
@@ -599,9 +616,11 @@ function signalCard(x){
   const sess = safe(x.session,'');
   const sc = sess==='NY'?'var(--bull)':sess==='London'?'var(--accent)':'var(--text3)';
   const sessTag = sess ? '<span class="sess-tag" style="color:'+sc+';border-color:'+sc+'">'+sess+'</span>' : '';
-  return '<div class="card '+bias+'">'+
+  var primeCls = x.srPrime? ' prime' : '';
+  var primeBadge = x.srPrime? '<span class="prime-badge">★ PRIME LOCATION</span>' : '';
+  return '<div class="card '+bias+primeCls+'">'+
     '<div class="card-top">'+
-      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+
+      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+primeBadge+
       '<span class="tag '+(isBull?'dir-bull':'dir-bear')+'">'+arrow+'</span>'+
       '<span class="tag type">'+safe(x.obType,'Swing')+'</span>'+
       '<span class="tag tf">'+safe(x.timeframe,'4H')+'</span>'+sessTag+
@@ -619,10 +638,11 @@ function signalCard(x){
       '<div style="margin-left:auto;color:var(--text3)">R:R '+rr+' · ref only</div>'+
     '</div>'+
     '<div class="conf-row">'+
-      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/7</span>'+
+      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/9</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
     dailySrLine(x)+
+    primeLine(x)+
     trailPlan(x)+
     factorBreakdown(x)+
     aiBlock(x)+
@@ -768,6 +788,17 @@ function trailPlan(x){
 }
 
 // ---- daily S/R context line for a signal/armed card ----
+function primeLine(x){
+  if(!x.srPrime && x.srDLo==null && x.srWLo==null) return '';
+  var bits = [];
+  if(x.srWLo!=null) bits.push('<b>WEEKLY</b> S/R '+fmt(x.pair,x.srWLo)+'–'+fmt(x.pair,x.srWHi));
+  if(x.srDLo!=null) bits.push('<b>DAILY</b> S/R '+fmt(x.pair,x.srDLo)+'–'+fmt(x.pair,x.srDHi));
+  var head = x.srPrime
+    ? '★ <b>PRIME</b> — the 4H OB <b>and</b> price are both inside a higher-timeframe level.'
+    : 'The 4H OB overlaps a higher-timeframe level (price not in it yet).';
+  return '<div class="prime-line">'+head+'<br>'+bits.join(' &nbsp;·&nbsp; ')+'</div>';
+}
+
 function dailySrLine(x){
   var parts = [];
   if(x.dailyAtLo!=null){
@@ -821,9 +852,18 @@ function factorBreakdown(x){
     var refTxt = (x.dblRef!=null)? ' (pullback '+fmt(x.pair,x.dblRef)+')' : '';
     row(x.dblKind, 'twin at <b>'+fmt(x.pair,x.dblA)+'</b> &amp; <b>'+fmt(x.pair,x.dblB)+'</b>'+refTxt);
   }
-  // 7. Major S/R — the channel the OB sits on
+  // 7. Major S/R — the 4H channel the OB sits on
   if(x.nearSr && x.srLo!=null){
-    row('Major S/R', 'respected band <b>'+fmt(x.pair,x.srLo)+' – '+fmt(x.pair,x.srHi)+'</b>');
+    row('Major S/R', '4H band <b>'+fmt(x.pair,x.srLo)+' – '+fmt(x.pair,x.srHi)+'</b>');
+  }
+  // 8/9. Higher-timeframe location — the strongest confluence
+  if(x.srDLo!=null){
+    row('Daily S/R', 'OB sits on daily band <b>'+fmt(x.pair,x.srDLo)+' – '+fmt(x.pair,x.srDHi)+'</b>'+
+      (x.srPrime?' <span style="color:var(--warn)">(price in it)</span>':''));
+  }
+  if(x.srWLo!=null){
+    row('Weekly S/R', 'OB sits on weekly band <b>'+fmt(x.pair,x.srWLo)+' – '+fmt(x.pair,x.srWHi)+'</b>'+
+      (x.srPrime?' <span style="color:var(--warn)">(price in it)</span>':''));
   }
   if(!rows.length) return '';
   return '<div class="fb-toggle" onclick="toggleFb(this)"><span class="fbchev">&#9656;</span>why these '+
@@ -864,7 +904,7 @@ function histRow(x){
     '<span class="mini" style="color:var(--text3);min-width:88px">'+tt+'</span>'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+(isBull?'var(--bull)':'var(--bear)')+'">'+(isBull?'▲':'▼')+' '+safe(x.obType,'')+'</span>'+
-    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/7</span>'+
+    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/9</span>'+
   '</div>';
 }
 
@@ -924,18 +964,33 @@ async function loadWatch(){
 
 // ---- Daily S/R levels panel ----
 function dailySrRow(x){
-  var st = x.status || 'unknown';
-  var cls = st==='in' ? 'in' : st==='support' ? 'below' : st==='resistance' ? 'above' : 'unknown';
-  var stTxt = st==='in' ? 'PRICE IN BAND'
-    : st==='support'    ? (Number(x.distancePips).toFixed(1)+'p below · support')
-    : st==='resistance' ? (Number(x.distancePips).toFixed(1)+'p above · resistance')
-    : '—';
-  return '<div class="aoi-row '+cls+'">'+
+  // one row per pair: how much room to the nearest wall each way
+  var parts = [];
+  if(x.inLo!=null){
+    parts.push('<span class="aoi-meta" style="color:var(--warn)">in band '+fmt(x.pair,x.inLo)+'–'+fmt(x.pair,x.inHi)+'</span>');
+  }
+  if(x.resPips!=null){
+    parts.push('<span class="aoi-meta" style="color:var(--bear)">&#9650; R '+fmt(x.pair,x.resLo)+
+      ' <b>'+Number(x.resPips).toFixed(0)+'p</b></span>');
+  }
+  if(x.supPips!=null){
+    parts.push('<span class="aoi-meta" style="color:var(--bull)">&#9660; S '+fmt(x.pair,x.supHi)+
+      ' <b>'+Number(x.supPips).toFixed(0)+'p</b></span>');
+  }
+  // headroom verdict: which way has more room to run
+  var verdict='', vcol='var(--text3)';
+  if(x.resPips!=null && x.supPips!=null){
+    if(x.resPips < 25 || x.supPips < 25){ verdict='WALL CLOSE'; vcol='var(--warn)'; }
+    else if(x.resPips > x.supPips*2){ verdict='room UP'; vcol='var(--bull)'; }
+    else if(x.supPips > x.resPips*2){ verdict='room DOWN'; vcol='var(--bear)'; }
+    else { verdict='balanced'; }
+  }
+  return '<div class="aoi-row" style="border-left-color:'+vcol+'">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
-    '<span class="aoi-band">'+fmt(x.pair,x.lo)+' – '+fmt(x.pair,x.hi)+'</span>'+
-    '<span class="aoi-meta">strength '+safe(x.strength,'—')+'</span>'+
+    '<span class="aoi-band">'+fmt(x.pair,x.price)+'</span>'+
+    parts.join('')+
     tvButton(x.pair)+
-    '<span class="aoi-status '+cls+'">'+stTxt+'</span>'+
+    (verdict?'<span class="aoi-status" style="color:'+vcol+';border-color:'+vcol+'">'+verdict+'</span>':'')+
   '</div>';
 }
 
@@ -949,8 +1004,11 @@ async function loadDailySr(){
   }
   const lv = data.levels;
   if(el) el.innerHTML = lv.length? lv.map(dailySrRow).join('')
-      : '<div class="empty">NO DAILY S/R BANDS<div class="sub">REFRESHES DAILY…</div></div>';
+      : '<div class="empty">NO DAILY S/R IN RANGE<div class="sub">NOTHING WITHIN REACH…</div></div>';
   setText('c-dsr', lv.length);
+  var dn = $('dsrNote');
+  if(dn) dn.textContent = 'Nearest daily wall each way, one row per pair. '+
+    (data.hidden? ('Hiding '+data.hidden+' level(s) further than '+data.maxDist+' pips — too far to matter.') : '');
 }
 
 // ---- screenshot -> trade parsing (review before saving) ----
@@ -977,7 +1035,7 @@ function jrStageRender(){
         c('OPENED',t.openedAt)+c('CLOSED',t.closedAt)+
       '</div>'+
       '<div class="stage-acts">'+
-        '<input placeholder="conf /7" id="stConf'+i+'">'+
+        '<input placeholder="conf /9" id="stConf'+i+'">'+
         '<input placeholder="sug SL pips" id="stSug'+i+'">'+
         '<input placeholder="max fav pips" id="stMfe'+i+'">'+
         '<input placeholder="factors" id="stFac'+i+'" style="width:130px">'+
@@ -1137,7 +1195,7 @@ async function loadJournal(){
         '<span class="mini" style="color:var(--text2)">@ '+fmt(t.pair,t.entry)+'</span>'+
         (t.exit!=null?'<span class="mini" style="color:var(--text2)">→ '+fmt(t.pair,t.exit)+'</span>':'')+
         (t.session?'<span class="sess-tag" style="color:var(--text3);border-color:var(--border2)">'+t.session+'</span>':'')+
-        (t.confluence!=null?'<span class="mini" style="color:var(--warn)">'+t.confluence+'/7</span>':'')+
+        (t.confluence!=null?'<span class="mini" style="color:var(--warn)">'+t.confluence+'/9</span>':'')+
         '<span class="push-right" style="color:'+rCol+';font-weight:600">'+rTxt+'</span>'+
         '<span class="mini" style="color:var(--text3);cursor:pointer" onclick="jrDelete(\''+t.id+'\')">✕</span>'+
       '</div>';
@@ -1189,21 +1247,19 @@ var aoiTf = 'daily';
 
 function aoiRow(x){
   var st = x.status || 'unknown';
+  var cls = st==='in' ? 'in' : st==='below' ? 'below' : st==='above' ? 'above' : 'unknown';
   var stTxt = st==='in' ? 'IN ZONE'
-    : st==='above' ? (Number(x.distancePips).toFixed(1)+' pips above')
-    : st==='below' ? (Number(x.distancePips).toFixed(1)+' pips below')
-    : '—';
-  var band = fmt(x.pair,x.lo)+' – '+fmt(x.pair,x.hi);
-  // age: bars are daily or weekly candles depending on tf
-  var ageUnit = x.tf==='weekly' ? 'wk' : 'd';
-  return '<div class="aoi-row '+st+'">'+
+    : (x.distancePips!=null ? Number(x.distancePips).toFixed(0)+'p '+(st==='above'?'below':'above') : '—');
+  var stCol = st==='in' ? 'var(--warn)' : (st==='above'?'var(--bull)':'var(--bear)');
+  // strength read: touches is what makes a zone worth respecting
+  var t = Number(safe(x.touches,0));
+  var tCol = t>=10 ? 'var(--warn)' : (t>=6 ? 'var(--accent)' : 'var(--text3)');
+  return '<div class="aoi-row '+cls+'">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
-    '<span class="aoi-band">'+band+'</span>'+
-    '<span class="aoi-meta aoi-touch">'+safe(x.touches,0)+' touches</span>'+
-    '<span class="aoi-meta">'+Number(safe(x.widthPips,0)).toFixed(1)+' pips wide</span>'+
-    '<span class="aoi-meta">last touch '+safe(x.ageBars,0)+ageUnit+' ago</span>'+
+    '<span class="aoi-band">'+fmt(x.pair,x.lo)+' – '+fmt(x.pair,x.hi)+'</span>'+
+    '<span class="aoi-meta" style="color:'+tCol+'">'+t+' touches</span>'+
     tvButton(x.pair)+
-    '<span class="aoi-status '+st+'">'+stTxt+'</span>'+
+    '<span class="aoi-status" style="color:'+stCol+';border-color:'+stCol+'">'+stTxt+'</span>'+
   '</div>';
 }
 
@@ -1225,7 +1281,9 @@ async function loadAoi(){
     if(log.refreshing){
       note.textContent = 'Refreshing zones… '+(log.progress||0)+'/'+(log.total||0)+(log.current?(' — '+log.current):'');
     } else if(log.last_refresh){
-      note.textContent = 'Zones from '+String(log.last_refresh).replace('T',' ').slice(0,16)+' UTC · switching timeframe is free · refresh recomputes (costs credits).';
+      note.textContent = 'One zone per pair — the one price is in, else the nearest. '+
+        (data.hidden? ('Hiding '+data.hidden+' pair(s) with nothing within '+data.maxDist+' pips. ') : '')+
+        'Zones from '+String(log.last_refresh).replace('T',' ').slice(0,16)+' UTC.';
     }
   }
 }
@@ -1339,7 +1397,7 @@ function signalAlert(x){
   const toast = document.createElement('div');
   toast.className = 'alert-toast'+(isBull?'':' bear');
   toast.innerHTML = '<div class="t">'+(isBull?'▲ NEW LONG SIGNAL':'▼ NEW SHORT SIGNAL')+'</div>'+
-    '<div>'+safe(x.pair,'—')+' · '+safe(x.confluence,0)+'/7 confluence · tap to view chart</div>';
+    '<div>'+safe(x.pair,'—')+' · '+safe(x.confluence,0)+'/9 confluence · tap to view chart</div>';
   toast.onclick = function(){ window.open(tvLink(x.pair),'_blank'); toast.remove(); };
   document.body.appendChild(toast);
   requestAnimationFrame(function(){ toast.classList.add('show'); });
