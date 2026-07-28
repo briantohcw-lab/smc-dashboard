@@ -1152,6 +1152,98 @@ def get_tracker():
             'positions': tracked[:50],
         })
 
+@app.route('/matrix')
+def get_matrix():
+    """
+    ONE row per scanned pair, with every condition as a column:
+      4H OB | 15m structure | Daily S/R | Weekly S/R | confluence | PRIME
+
+    Built entirely from data already cached by the scanners — no API calls,
+    so it refreshes for free alongside everything else.
+    """
+    with _lock:
+        sig = {s['pair']: s for s in signals}
+        arm = {a['pair']: a for a in armed}
+        wat = {w['pair']: w for w in watchlist}
+    with _aoi_lock:
+        zones = dict(aoi_zones)
+
+    rows = []
+    for symbol in PAIRS:
+        clean = symbol.replace('/', '')
+        price = last_prices_global.get(clean)
+        z = zones.get(clean, {})
+
+        # ── 4H OB state ──
+        e = sig.get(clean) or arm.get(clean)
+        if clean in sig:
+            ob_state = 'signal'
+        elif clean in arm:
+            ob_state = 'armed'
+        elif clean in wat:
+            ob_state = 'near'
+        else:
+            ob_state = 'none'
+
+        bias = (e or wat.get(clean, {})).get('bias')
+        conf = e.get('confluence') if e else None
+        prime = bool(e.get('srPrime')) if e else False
+        near_pips = wat.get(clean, {}).get('distancePips')
+
+        # ── 15m structure ──
+        if e:
+            if e.get('aligned') or e.get('m15struct'):
+                ltf = e.get('m15struct') or 'aligned'
+                ltf_state = 'confirmed'
+            elif e.get('brState') == 'broken':
+                ltf, ltf_state = 'broke — awaiting retest', 'broken'
+            else:
+                ltf, ltf_state = (e.get('m15needed') or 'waiting'), 'waiting'
+        else:
+            ltf, ltf_state = '', 'none'
+
+        # ── Daily / Weekly S/R: is price inside a band right now? ──
+        def band_state(bands):
+            if price is None or not bands:
+                return 'none', None, None
+            for b in bands:
+                if b['lo'] <= price <= b['hi']:
+                    return 'in', b['lo'], b['hi']
+            # nearest band, for context
+            best, bd = None, None
+            pip = engine._pip_size(clean)
+            for b in bands:
+                d = (b['lo'] - price) / pip if b['lo'] > price else (price - b['hi']) / pip
+                if bd is None or d < bd:
+                    bd, best = d, b
+            if best is not None and bd is not None and bd <= 60:
+                return 'near', best['lo'], best['hi']
+            return 'none', None, None
+
+        d_state, d_lo, d_hi = band_state(z.get('sr_daily', []))
+        w_state, w_lo, w_hi = band_state(z.get('sr_weekly', []))
+
+        rows.append({
+            'pair': clean, 'price': price,
+            'ob': ob_state, 'bias': bias, 'nearPips': near_pips,
+            'obLow': e.get('obLow') if e else None,
+            'obHigh': e.get('obHigh') if e else None,
+            'ltf': ltf, 'ltfState': ltf_state,
+            'daily': d_state, 'dailyLo': d_lo, 'dailyHi': d_hi,
+            'weekly': w_state, 'weeklyLo': w_lo, 'weeklyHi': w_hi,
+            'confluence': conf, 'prime': prime,
+        })
+
+    # most actionable first: signals, then armed, then near, then the rest;
+    # within each, higher confluence first
+    order = {'signal': 0, 'armed': 1, 'near': 2, 'none': 3}
+    rows.sort(key=lambda r: (order.get(r['ob'], 9),
+                             -(r['confluence'] or 0),
+                             r['nearPips'] if r['nearPips'] is not None else 9e9,
+                             r['pair']))
+    return jsonify({'rows': rows, 'count': len(rows)})
+
+
 @app.route('/status')
 def status():
     used = _load_credits()
