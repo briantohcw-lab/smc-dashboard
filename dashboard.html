@@ -197,6 +197,34 @@
   .prime-line{margin-top:10px;padding:9px 10px;border-radius:6px;font-size:10px;
     background:rgba(240,180,41,0.07);border:1px solid rgba(240,180,41,0.3);color:var(--text2)}
   .prime-line b{color:var(--warn)}
+  /* ── multi-pair matrix ── */
+  .mx-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+  table.mx{border-collapse:collapse;width:100%;font-size:10px;white-space:nowrap}
+  table.mx th{background:var(--panel2);color:var(--text3);font-size:8px;letter-spacing:0.1em;
+    font-weight:400;padding:9px 8px;text-align:center;border-bottom:1px solid var(--border)}
+  table.mx td{padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)}
+  table.mx tr:last-child td{border-bottom:none}
+  table.mx tr:hover td{background:rgba(88,166,255,0.05)}
+  table.mx .mx-pair{text-align:left;font-weight:700;color:#fff;font-size:11px;
+    position:sticky;left:0;background:var(--panel);z-index:1;min-width:74px}
+  table.mx tr:hover .mx-pair{background:var(--panel2)}
+  tr.mx-prime .mx-pair{color:var(--warn)}
+  tr.mx-prime td{background:rgba(240,180,41,0.06)}
+  .cell{display:inline-block;padding:3px 8px;border-radius:4px;font-size:9px;
+    letter-spacing:0.04em;font-weight:600;min-width:42px}
+  .c-long {background:rgba(63,214,139,0.16);color:var(--bull);border:1px solid rgba(63,214,139,0.5)}
+  .c-short{background:rgba(255,93,108,0.16);color:var(--bear);border:1px solid rgba(255,93,108,0.5)}
+  .c-armed{background:rgba(240,180,41,0.14);color:var(--warn);border:1px solid rgba(240,180,41,0.45)}
+  .c-near {color:var(--text3);border:1px solid var(--border2)}
+  .c-in   {background:rgba(240,180,41,0.16);color:var(--warn);border:1px solid rgba(240,180,41,0.5)}
+  .c-close{color:var(--accent);border:1px solid rgba(88,166,255,0.4)}
+  .c-none {color:var(--dim)}
+  .mx-conf{font-weight:700}
+  .mx-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:9px;color:var(--text3);
+    padding:8px 4px 10px;letter-spacing:0.04em}
+  .mx-only{font-size:9px;letter-spacing:0.06em;color:var(--text3);cursor:pointer;
+    border:1px solid var(--border2);border-radius:5px;padding:5px 10px;user-select:none}
+  .mx-only.active{color:#04111f;background:var(--accent);border-color:var(--accent);font-weight:700}
   /* trade journal */
   .jr-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
   .jr-form input,.jr-form select{background:var(--panel2);border:1px solid var(--border2);
@@ -424,6 +452,26 @@
       </div>
     </div>
   </div>
+
+  <section>
+    <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▦ ALL PAIRS — CONDITION MATRIX<span class="sec-count" id="c-mx">0</span></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span class="mx-only" id="mxOnlyActive">SHOW ONLY ACTIVE</span>
+      <span class="mx-legend" style="padding:0">
+        <span>4H OB: <b style="color:var(--bull)">LONG</b>/<b style="color:var(--bear)">SHORT</b> = signal · <b style="color:var(--warn)">ARMED</b> = in zone · near = approaching</span>
+        <span><b style="color:var(--warn)">★</b> = PRIME (OB + price on a daily/weekly level)</span>
+      </span>
+    </div>
+    <div class="mx-wrap">
+      <table class="mx">
+        <thead><tr>
+          <th class="mx-pair" style="text-align:left">PAIR</th>
+          <th>4H OB</th><th>15M</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
+        </tr></thead>
+        <tbody id="mxBody"></tbody>
+      </table>
+    </div>
+  </section>
 
   <div class="two-col">
     <section>
@@ -962,6 +1010,65 @@ async function loadWatch(){
   setText('c-watch', data.length);
 }
 
+// ---- multi-pair condition matrix ----
+var mxOnlyActive = false;
+
+function mxCell(cls, txt, title){
+  return '<span class="cell '+cls+'"'+(title?' title="'+title+'"':'')+'>'+txt+'</span>';
+}
+
+function mxRow(r){
+  // 4H OB column
+  var ob;
+  if(r.ob==='signal')     ob = mxCell(r.bias==='bull'?'c-long':'c-short', r.bias==='bull'?'LONG':'SHORT',
+                                      'Signal — price in the 4H OB and 15m confirmed');
+  else if(r.ob==='armed') ob = mxCell('c-armed','ARMED','Price is inside the 4H OB, waiting on 15m');
+  else if(r.ob==='near')  ob = mxCell('c-near', (r.nearPips!=null? Number(r.nearPips).toFixed(0)+'p':'near'),
+                                      'Approaching a 4H OB');
+  else                    ob = mxCell('c-none','–');
+
+  // 15m column
+  var ltf;
+  if(r.ltfState==='confirmed')   ltf = mxCell(r.bias==='bull'?'c-long':'c-short', r.ltf, '15m structure agrees');
+  else if(r.ltfState==='broken') ltf = mxCell('c-close','retest','15m broke — waiting for the retest');
+  else if(r.ltfState==='waiting')ltf = mxCell('c-armed','wait', r.ltf||'awaiting 15m confirmation');
+  else                           ltf = mxCell('c-none','–');
+
+  function srCell(state, lo, hi){
+    if(state==='in')   return mxCell('c-in','IN', lo!=null? ('band '+fmt(r.pair,lo)+'–'+fmt(r.pair,hi)) : '');
+    if(state==='near') return mxCell('c-close','near', lo!=null? ('band '+fmt(r.pair,lo)+'–'+fmt(r.pair,hi)) : '');
+    return mxCell('c-none','–');
+  }
+
+  var conf = (r.confluence!=null)
+    ? '<span class="mx-conf" style="color:'+(r.confluence>=5?'var(--warn)':(r.confluence>=3?'var(--text)':'var(--text3)'))+'">'+r.confluence+'/9</span>'
+    : '<span style="color:var(--dim)">–</span>';
+  var star = r.prime? '<span style="color:var(--warn);font-size:13px">★</span>' : '<span style="color:var(--dim)">·</span>';
+
+  return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
+    '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a></td>'+
+    '<td>'+ob+'</td><td>'+ltf+'</td>'+
+    '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
+    '<td>'+srCell(r.weekly, r.weeklyLo, r.weeklyHi)+'</td>'+
+    '<td>'+conf+'</td><td>'+star+'</td>'+
+  '</tr>';
+}
+
+async function loadMatrix(){
+  const d = await getJSON('/matrix');
+  const el = $('mxBody');
+  if(!d || !Array.isArray(d.rows)){
+    if(el) el.innerHTML = '<tr><td colspan="7" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
+    setText('c-mx', 0);
+    return;
+  }
+  var rows = d.rows;
+  if(mxOnlyActive) rows = rows.filter(function(r){ return r.ob!=='none'; });
+  if(el) el.innerHTML = rows.length? rows.map(mxRow).join('')
+    : '<tr><td colspan="7" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
+  setText('c-mx', rows.length);
+}
+
 // ---- Daily S/R levels panel ----
 function dailySrRow(x){
   // one row per pair: how much room to the nearest wall each way
@@ -1376,7 +1483,7 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal() ]);
+  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal(), loadMatrix() ]);
 }
 
 // ---- signal alert (toast + optional beep) ----
@@ -1558,6 +1665,14 @@ function wireControls(){
     a.href=URL.createObjectURL(blob);
     a.download='smc_journal_backup.json';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+
+  // matrix: show-only-active toggle
+  var mxo = document.getElementById('mxOnlyActive');
+  if(mxo) mxo.addEventListener('click', function(){
+    mxOnlyActive = !mxOnlyActive;
+    mxo.classList.toggle('active', mxOnlyActive);
+    loadMatrix();
   });
 
   // AOI timeframe toggle (Daily/Weekly) — free, just re-reads cached zones
