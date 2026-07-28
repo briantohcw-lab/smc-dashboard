@@ -165,6 +165,16 @@ _aoi_lock = threading.Lock()
 # latest price per clean pair, updated by the OB scanner each cycle; used by the
 # AOI panel to place price against zones live (free — no extra fetch).
 last_prices_global = {}
+# Per-pair market trend, so the matrix can show a direction for EVERY pair —
+# not just ones that happen to be sitting in an order block.
+#   h4 = 4H swing trend (from the OB scanner, refreshed each scan)
+#   d1 = daily swing trend (from the AOI pass, refreshed daily — free)
+pair_trend = {}          # clean pair -> {'h4': 'bull'|'bear'|None, 'd1': ...}
+
+
+def _set_trend(clean, key, val):
+    t = pair_trend.setdefault(clean, {'h4': None, 'd1': None})
+    t[key] = ('bull' if val == BULLISH else ('bear' if val == BEARISH else None))
 
 
 def _nearest_daily_sr(clean, price):
@@ -666,6 +676,7 @@ def scan_once():
 
         # capture latest price for the auto-tracker (uses 15m close as "now")
         latest_prices[symbol.replace('/', '')] = round(res.price, 5)
+        _set_trend(symbol.replace('/', ''), 'h4', res.swing_trend)
         # also track the high/low of the most recent 15m candle so we can detect
         # whether price WICKED through SL/TP, not just closed through
         if c15:
@@ -1054,6 +1065,13 @@ def scan_aoi_once():
                         max_sr=DAILY_SR_MAX)
                 except Exception:
                     entry['sr_daily'] = []
+                # DAILY swing trend from the same candles (free). Gives the
+                # matrix a higher-timeframe direction to compare 4H against.
+                try:
+                    _, _, d_trend, _ = engine._process_structure(cd, 10)
+                    _set_trend(clean, 'd1', d_trend)
+                except Exception:
+                    pass
             if cw:
                 entry['weekly'] = engine.detect_aoi(
                     cw, pip, min_touches=AOI_MIN_TOUCHES,
@@ -1223,8 +1241,17 @@ def get_matrix():
         d_state, d_lo, d_hi = band_state(z.get('sr_daily', []))
         w_state, w_lo, w_hi = band_state(z.get('sr_weekly', []))
 
+        # ── trend: 4H (primary) and Daily (context) ──
+        tr = pair_trend.get(clean, {})
+        h4, d1 = tr.get('h4'), tr.get('d1')
+        # do the two timeframes agree, and does the setup agree with them?
+        tf_align = (h4 is not None and h4 == d1)
+        with_trend = (bias is not None and h4 is not None and bias == h4)
+
         rows.append({
             'pair': clean, 'price': price,
+            'trendH4': h4, 'trendD1': d1,
+            'tfAlign': tf_align, 'withTrend': with_trend,
             'ob': ob_state, 'bias': bias, 'nearPips': near_pips,
             'obLow': e.get('obLow') if e else None,
             'obHigh': e.get('obHigh') if e else None,
