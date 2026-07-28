@@ -199,6 +199,67 @@ def _nearest_daily_sr(clean, price):
     return out
 
 
+def _sr_confluence(entry):
+    """
+    PRIME-LOCATION check: does the 4H order block overlap a DAILY or WEEKLY
+    S/R band, and is price itself in there too?
+
+    An OB is just a zone where orders were left behind. An OB that sits on a
+    level the market has respected for months is a far better location than one
+    floating in open space. When price is ALSO inside that band, the 4H setup
+    and the higher-timeframe level line up — the highest-quality version of
+    this setup. That state is tagged 'prime' and surfaced on the card.
+
+    Adds to the entry (in place):
+      srDLo/srDHi/srDStrength  daily band the OB overlaps
+      srWLo/srWHi/srWStrength  weekly band the OB overlaps
+      srPrime                  True when price is inside an overlapped band
+    and appends 'Daily S/R' / 'Weekly S/R' factors, bumping the score.
+    """
+    pair = entry.get('pair')
+    lo, hi = entry.get('obLow'), entry.get('obHigh')
+    price = entry.get('price')
+    if not pair or lo is None or hi is None:
+        return
+    with _aoi_lock:
+        data = aoi_zones.get(pair)
+        d_bands = list(data.get('sr_daily', [])) if data else []
+        w_bands = list(data.get('sr_weekly', [])) if data else []
+
+    def overlap(bands):
+        best = None
+        for b in bands:
+            if lo <= b['hi'] and hi >= b['lo']:          # zone overlap
+                if best is None or b.get('strength', 0) > best.get('strength', 0):
+                    best = b
+        return best
+
+    d = overlap(d_bands)
+    w = overlap(w_bands)
+    factors = entry.get('factors') or []
+    score = entry.get('confluence') or 0
+    prime = False
+
+    if d:
+        entry['srDLo'], entry['srDHi'] = d['lo'], d['hi']
+        entry['srDStrength'] = d.get('strength')
+        if 'Daily S/R' not in factors:
+            factors.append('Daily S/R'); score += 1
+        if price is not None and d['lo'] <= price <= d['hi']:
+            prime = True
+    if w:
+        entry['srWLo'], entry['srWHi'] = w['lo'], w['hi']
+        entry['srWStrength'] = w.get('strength')
+        if 'Weekly S/R' not in factors:
+            factors.append('Weekly S/R'); score += 1
+        if price is not None and w['lo'] <= price <= w['hi']:
+            prime = True
+
+    entry['srPrime'] = prime
+    entry['factors'] = factors
+    entry['confluence'] = score
+
+
 def _attach_daily_sr(entry):
     """Augment a signal/armed entry with nearest daily S/R levels (free)."""
     try:
@@ -675,6 +736,7 @@ def scan_once():
         }
 
         _attach_daily_sr(entry)
+        _sr_confluence(entry)
         if struct_aligned:
             # full confluence signal — price in OB AND 15m confirmed
             new_signals.append(entry)
@@ -914,6 +976,7 @@ def reanalyze_from_cache():
             'receivedAt': datetime.now(timezone.utc).isoformat(),
         }
         _attach_daily_sr(entry)
+        _sr_confluence(entry)
         if struct_aligned:
             new_signals.append(entry)
         else:
@@ -975,7 +1038,7 @@ def scan_aoi_once():
             continue
 
         pip = engine._pip_size(symbol)
-        entry = {'daily': [], 'weekly': [], 'sr_daily': [], 'price': None}
+        entry = {'daily': [], 'weekly': [], 'sr_daily': [], 'sr_weekly': [], 'price': None}
         try:
             if cd:
                 entry['daily'] = engine.detect_aoi(
@@ -996,6 +1059,16 @@ def scan_aoi_once():
                     cw, pip, min_touches=AOI_MIN_TOUCHES,
                     min_w_pips=AOI_MIN_PIPS, max_w_pips=AOI_MAX_PIPS,
                     lookback_bars=AOI_WEEKLY_LIFE, pivot_lr=2)
+                # WEEKLY S/R channels from the same weekly candles (no extra
+                # credits). A 4H OB sitting on a weekly level is the strongest
+                # location confluence available.
+                try:
+                    entry['sr_weekly'] = engine.detect_sr_channels(
+                        cw, prd=6, loopback=min(len(cw), 260),
+                        channel_w_pct=DAILY_SR_WPCT, min_strength=DAILY_SR_MINSTR,
+                        max_sr=DAILY_SR_MAX)
+                except Exception:
+                    entry['sr_weekly'] = []
         except Exception as e:
             aoi_log['last_error'] = f'{clean} aoi error: {e}'
         result[clean] = entry
@@ -1107,36 +1180,70 @@ def scan_now():
 
 @app.route('/aoi')
 def get_aoi():
-    """Return cached AOI zones for the requested timeframe (daily|weekly),
-    with each zone placed against the latest known price. Free — no fetch."""
+    """
+    ONE row per pair: the single most relevant AOI zone for that pair —
+    the one price is inside, else the nearest one.
+
+    v2: the old version returned every zone for every pair (200+ rows, nearly
+    all tagged IN ZONE because the bands are wide). That was noise. Now each
+    pair contributes at most one zone, anything beyond `max_dist` pips is
+    dropped as un-actionable, and the strongest/nearest wins.
+
+    Query params:  tf=daily|weekly, max_dist=<pips> (default 120), all=1
+    """
     tf = request.args.get('tf', 'daily')
     if tf not in ('daily', 'weekly'):
         tf = 'daily'
-    out = []
+    show_all = request.args.get('all') in ('1', 'true', 'True')
+    try:
+        max_dist = float(request.args.get('max_dist', 120))
+    except ValueError:
+        max_dist = 120.0
+
+    rows, hidden = [], 0
     with _aoi_lock:
         items = list(aoi_zones.items())
+
     for clean, data in items:
         price = last_prices_global.get(clean, data.get('price'))
         pip = engine._pip_size(clean)
+        best = None
         for z in data.get(tf, []):
             if price is None:
                 dist, status = None, 'unknown'
             elif z['lo'] <= price <= z['hi']:
                 dist, status = 0.0, 'in'
             elif price < z['lo']:
-                dist, status = round((z['lo'] - price) / pip, 1), 'below'
+                dist, status = round((z['lo'] - price) / pip, 1), 'above'
             else:
-                dist, status = round((price - z['hi']) / pip, 1), 'above'
-            out.append({
+                dist, status = round((price - z['hi']) / pip, 1), 'below'
+            cand = {
                 'pair': clean, 'tf': tf,
                 'hi': z['hi'], 'lo': z['lo'], 'mid': z['mid'],
                 'touches': z['touches'], 'widthPips': z['width_pips'],
                 'ageBars': z['age_bars'], 'price': price,
                 'distancePips': dist, 'status': status,
-            })
-    # in-zone first, then nearest by distance
-    out.sort(key=lambda a: (a['distancePips'] if a['distancePips'] is not None else 9e9))
-    return jsonify({'tf': tf, 'count': len(out), 'zones': out, 'log': aoi_log})
+            }
+            # keep the closest zone; tie-break on more touches
+            if best is None:
+                best = cand
+            else:
+                d0 = best['distancePips'] if best['distancePips'] is not None else 9e9
+                d1 = dist if dist is not None else 9e9
+                if d1 < d0 or (d1 == d0 and cand['touches'] > best['touches']):
+                    best = cand
+        if best is None:
+            continue
+        d = best['distancePips']
+        if not show_all and d is not None and d > max_dist:
+            hidden += 1
+            continue
+        rows.append(best)
+
+    # in-zone first, then nearest
+    rows.sort(key=lambda a: (a['distancePips'] if a['distancePips'] is not None else 9e9))
+    return jsonify({'tf': tf, 'count': len(rows), 'hidden': hidden,
+                    'maxDist': max_dist, 'zones': rows, 'log': aoi_log})
 
 
 @app.route('/aoi-refresh')
@@ -1297,31 +1404,81 @@ def journal_import():
 
 @app.route('/daily-sr')
 def get_daily_sr():
-    """Return cached broad daily S/R channels per pair, each placed against the
-    latest known price (support = band below price, resistance = above). Free."""
-    out = []
+    """
+    ONE row per pair: nearest daily resistance ABOVE price and nearest support
+    BELOW price (plus the band price sits inside, if any).
+
+    v2: the old version returned every band for every pair — 150+ rows,
+    including supports 800 pips away that no 4H setup will ever reach. A level
+    only matters if your trade can actually reach it, so anything beyond
+    `max_dist` pips is dropped.
+
+    Query params:  max_dist=<pips> (default 200), all=1
+    """
+    show_all = request.args.get('all') in ('1', 'true', 'True')
+    try:
+        max_dist = float(request.args.get('max_dist', 200))
+    except ValueError:
+        max_dist = 200.0
+
+    rows, hidden = [], 0
     with _aoi_lock:
         items = list(aoi_zones.items())
+
     for clean, data in items:
         bands = data.get('sr_daily', [])
+        if not bands:
+            continue
         price = last_prices_global.get(clean, data.get('price'))
+        if price is None:
+            continue
         pip = engine._pip_size(clean)
+        res = sup = inband = None
         for b in bands:
-            if price is None:
-                dist, status = None, 'unknown'
-            elif b['lo'] <= price <= b['hi']:
-                dist, status = 0.0, 'in'
-            elif b['hi'] < price:
-                dist, status = round((price - b['hi']) / pip, 1), 'support'
-            else:
-                dist, status = round((b['lo'] - price) / pip, 1), 'resistance'
-            out.append({
-                'pair': clean, 'hi': b['hi'], 'lo': b['lo'],
-                'strength': b.get('strength'), 'price': price,
-                'distancePips': dist, 'status': status,
-            })
-    out.sort(key=lambda a: (a['pair'], a['distancePips'] if a['distancePips'] is not None else 9e9))
-    return jsonify({'levels': out, 'count': len(out), 'log': aoi_log})
+            if b['lo'] <= price <= b['hi']:
+                if inband is None or b.get('strength', 0) > inband.get('strength', 0):
+                    inband = b
+            elif b['lo'] > price:                       # above price -> resistance
+                if res is None or b['lo'] < res['lo']:
+                    res = b
+            else:                                        # below price -> support
+                if sup is None or b['hi'] > sup['hi']:
+                    sup = b
+
+        resPips = round((res['lo'] - price) / pip, 1) if res else None
+        supPips = round((price - sup['hi']) / pip, 1) if sup else None
+
+        # drop levels that are too far to matter for a 4H setup
+        if not show_all:
+            if resPips is not None and resPips > max_dist:
+                res, resPips, hidden = None, None, hidden + 1
+            if supPips is not None and supPips > max_dist:
+                sup, supPips, hidden = None, None, hidden + 1
+        if res is None and sup is None and inband is None:
+            continue
+
+        # how much room before the trade hits a wall, in each direction
+        rows.append({
+            'pair': clean, 'price': price,
+            'inLo': inband['lo'] if inband else None,
+            'inHi': inband['hi'] if inband else None,
+            'resLo': res['lo'] if res else None,
+            'resHi': res['hi'] if res else None,
+            'resPips': resPips,
+            'resStrength': res.get('strength') if res else None,
+            'supLo': sup['lo'] if sup else None,
+            'supHi': sup['hi'] if sup else None,
+            'supPips': supPips,
+            'supStrength': sup.get('strength') if sup else None,
+        })
+
+    # tightest room first — those are the pairs about to hit something
+    def room(r):
+        vals = [v for v in (r['resPips'], r['supPips']) if v is not None]
+        return min(vals) if vals else 9e9
+    rows.sort(key=room)
+    return jsonify({'levels': rows, 'count': len(rows), 'hidden': hidden,
+                    'maxDist': max_dist, 'log': aoi_log})
 
 
 @app.route('/settings')
