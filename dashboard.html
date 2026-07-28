@@ -220,6 +220,12 @@
   .c-close{color:var(--accent);border:1px solid rgba(88,166,255,0.4)}
   .c-none {color:var(--dim)}
   .mx-conf{font-weight:700}
+  .c-tbull{background:rgba(63,214,139,0.16);color:var(--bull);border:1px solid rgba(63,214,139,0.5)}
+  .c-tbear{background:rgba(255,93,108,0.16);color:var(--bear);border:1px solid rgba(255,93,108,0.5)}
+  .c-tnone{color:var(--dim);border:1px solid var(--border)}
+  .mx-stack{display:flex;flex-direction:column;gap:2px;align-items:center}
+  .mx-sub{font-size:8px;letter-spacing:0.06em;color:var(--text3)}
+  .mx-counter{color:var(--bear);font-size:9px;font-weight:700}
   .mx-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:9px;color:var(--text3);
     padding:8px 4px 10px;letter-spacing:0.04em}
   .mx-only{font-size:9px;letter-spacing:0.06em;color:var(--text3);cursor:pointer;
@@ -460,12 +466,14 @@
       <span class="mx-legend" style="padding:0">
         <span>4H OB: <b style="color:var(--bull)">LONG</b>/<b style="color:var(--bear)">SHORT</b> = signal · <b style="color:var(--warn)">ARMED</b> = in zone · near = approaching</span>
         <span><b style="color:var(--warn)">★</b> = PRIME (OB + price on a daily/weekly level)</span>
+        <span>TREND: 4H over Daily · <b style="color:var(--bear)">!</b> = setup is against the 4H trend</span>
       </span>
     </div>
     <div class="mx-wrap">
       <table class="mx">
         <thead><tr>
           <th class="mx-pair" style="text-align:left">PAIR</th>
+          <th>TREND<div class="mx-sub">4H / D1</div></th>
           <th>4H OB</th><th>15M</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
         </tr></thead>
         <tbody id="mxBody"></tbody>
@@ -1018,7 +1026,19 @@ function mxCell(cls, txt, title){
 }
 
 function mxRow(r){
-  // 4H OB column
+  // ── TREND column: 4H over Daily ──
+  function tCell(t){
+    if(t==='bull') return '<span class="cell c-tbull">▲ UP</span>';
+    if(t==='bear') return '<span class="cell c-tbear">▼ DN</span>';
+    return '<span class="cell c-tnone">–</span>';
+  }
+  var trend = '<div class="mx-stack">'+tCell(r.trendH4)+
+    '<span class="mx-sub"'+(r.tfAlign?' style="color:var(--warn)"':'')+'>D1 '+
+      (r.trendD1==='bull'?'▲':(r.trendD1==='bear'?'▼':'–'))+
+      (r.tfAlign?' aligned':'')+'</span></div>';
+
+  // 4H OB column — flag counter-trend setups
+  var counter = (r.bias && r.trendH4 && !r.withTrend) ? ' <span class="mx-counter" title="This setup is AGAINST the 4H trend">!</span>' : '';
   var ob;
   if(r.ob==='signal')     ob = mxCell(r.bias==='bull'?'c-long':'c-short', r.bias==='bull'?'LONG':'SHORT',
                                       'Signal — price in the 4H OB and 15m confirmed');
@@ -1026,6 +1046,7 @@ function mxRow(r){
   else if(r.ob==='near')  ob = mxCell('c-near', (r.nearPips!=null? Number(r.nearPips).toFixed(0)+'p':'near'),
                                       'Approaching a 4H OB');
   else                    ob = mxCell('c-none','–');
+  ob += counter;
 
   // 15m column
   var ltf;
@@ -1047,6 +1068,7 @@ function mxRow(r){
 
   return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
     '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a></td>'+
+    '<td>'+trend+'</td>'+
     '<td>'+ob+'</td><td>'+ltf+'</td>'+
     '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
     '<td>'+srCell(r.weekly, r.weeklyLo, r.weeklyHi)+'</td>'+
@@ -1058,14 +1080,14 @@ async function loadMatrix(){
   const d = await getJSON('/matrix');
   const el = $('mxBody');
   if(!d || !Array.isArray(d.rows)){
-    if(el) el.innerHTML = '<tr><td colspan="7" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
+    if(el) el.innerHTML = '<tr><td colspan="8" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
     setText('c-mx', 0);
     return;
   }
   var rows = d.rows;
   if(mxOnlyActive) rows = rows.filter(function(r){ return r.ob!=='none'; });
   if(el) el.innerHTML = rows.length? rows.map(mxRow).join('')
-    : '<tr><td colspan="7" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
+    : '<tr><td colspan="8" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
   setText('c-mx', rows.length);
 }
 
