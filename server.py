@@ -31,6 +31,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ── Config from environment ──
+SERVER_VERSION = '2.4-trend'   # bump on each deploy so /status confirms what is live
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -1170,6 +1171,36 @@ def get_tracker():
             'positions': tracked[:50],
         })
 
+def _trend_for(clean):
+    """
+    4H + D1 trend for a pair. Prefers the value stored by the last scan, but
+    falls back to computing it from the CACHED candles on demand.
+
+    Why the fallback: pair_trend only fills while a full scan runs, so after a
+    restart (every redeploy) the matrix showed a blank trend column until the
+    next scan — up to SCAN_INTERVAL later. Deriving it from the cached candles
+    makes it available as soon as any scan data exists, at zero API cost.
+    """
+    t = dict(pair_trend.get(clean, {'h4': None, 'd1': None}))
+    if t.get('h4') is None:
+        with _last_scan_lock:
+            entry = None
+            for sym, val in _last_scan_candles.items():
+                if sym.replace('/', '') == clean:
+                    entry = val
+                    break
+        if entry:
+            try:
+                c4 = entry[0]
+                if c4 and len(c4) > engine.swing_length + 5:
+                    _, _, tr, _ = engine._process_structure(c4, engine.swing_length)
+                    t['h4'] = ('bull' if tr == BULLISH else ('bear' if tr == BEARISH else None))
+                    _set_trend(clean, 'h4', tr)      # remember it
+            except Exception:
+                pass
+    return t
+
+
 @app.route('/matrix')
 def get_matrix():
     """
@@ -1242,7 +1273,7 @@ def get_matrix():
         w_state, w_lo, w_hi = band_state(z.get('sr_weekly', []))
 
         # ── trend: 4H (primary) and Daily (context) ──
-        tr = pair_trend.get(clean, {})
+        tr = _trend_for(clean)
         h4, d1 = tr.get('h4'), tr.get('d1')
         # do the two timeframes agree, and does the setup agree with them?
         tf_align = (h4 is not None and h4 == d1)
@@ -1277,6 +1308,8 @@ def status():
     scan_log['credits_used_today'] = used
     return jsonify({
         'running': True,
+        'version': SERVER_VERSION,
+        'trend_pairs': sum(1 for v in pair_trend.values() if v.get('h4')),
         'pairs': PAIRS,
         'scan_interval': SCAN_INTERVAL,
         'log': scan_log,
