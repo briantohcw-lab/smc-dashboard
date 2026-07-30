@@ -271,6 +271,47 @@ def _sr_confluence(entry):
     entry['confluence'] = score
 
 
+def _candle_pattern(entry, c4, c15):
+    """
+    Look for a candlestick reversal pattern that (a) agrees with the OB
+    direction and (b) printed while price was interacting with the zone.
+
+    Checked on the 15m first (entry timing — the pattern you act on) and then
+    on the 4H (the bigger reaction at the zone). A pattern in open space is
+    ignored on purpose: it is the combination of LEVEL + PATTERN that matters,
+    which is exactly the morning-star-at-the-AOI setup.
+    """
+    bias = BULLISH if entry.get('bias') == 'bull' else BEARISH
+    lo, hi = entry.get('obLow'), entry.get('obHigh')
+    if lo is None or hi is None:
+        return
+    found, tf = None, None
+    try:
+        if c15:
+            a15 = engine._atr(c15, 14)
+            found = engine.best_pattern_at_zone(
+                c15, bias, lo, hi, atr=(a15[-1] if a15 else None), lookback=6)
+            tf = '15m'
+        if found is None and c4:
+            a4 = engine._atr(c4, 14)
+            found = engine.best_pattern_at_zone(
+                c4, bias, lo, hi, atr=(a4[-1] if a4 else None), lookback=4)
+            tf = '4H'
+    except Exception:
+        return
+    if not found:
+        return
+    entry['pattern'] = found['name']
+    entry['patternTf'] = tf
+    entry['patternStrength'] = found['strength']
+    entry['patternBarsAgo'] = found['barsAgo']
+    factors = entry.get('factors') or []
+    if found['name'] not in factors:
+        factors.append(found['name'])
+        entry['confluence'] = (entry.get('confluence') or 0) + 1
+    entry['factors'] = factors
+
+
 def _attach_daily_sr(entry):
     """Augment a signal/armed entry with nearest daily S/R levels (free)."""
     try:
@@ -749,6 +790,7 @@ def scan_once():
 
         _attach_daily_sr(entry)
         _sr_confluence(entry)
+        _candle_pattern(entry, c4, c15)
         if struct_aligned:
             # full confluence signal — price in OB AND 15m confirmed
             new_signals.append(entry)
@@ -989,6 +1031,7 @@ def reanalyze_from_cache():
         }
         _attach_daily_sr(entry)
         _sr_confluence(entry)
+        _candle_pattern(entry, c4, c15)
         if struct_aligned:
             new_signals.append(entry)
         else:
@@ -1290,6 +1333,9 @@ def get_matrix():
             'daily': d_state, 'dailyLo': d_lo, 'dailyHi': d_hi,
             'weekly': w_state, 'weeklyLo': w_lo, 'weeklyHi': w_hi,
             'confluence': conf, 'prime': prime,
+            'pattern': (e or {}).get('pattern'),
+            'patternTf': (e or {}).get('patternTf'),
+            'patternStrength': (e or {}).get('patternStrength'),
         })
 
     # most actionable first: signals, then armed, then near, then the rest;
