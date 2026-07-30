@@ -1311,6 +1311,153 @@ class SMCEngine:
                 return ch
         return None
 
+    # ── Candlestick reversal patterns ──────────────────────────────────
+    # A pattern in open space is noise. A pattern printed INSIDE an order
+    # block or S/R zone is the market showing its hand at a level that
+    # already matters — that is the combination worth trading, so the
+    # server only scores these when they land at a zone.
+
+    @staticmethod
+    def _cparts(c):
+        """body, upper wick, lower wick, full range, direction."""
+        rng = c.high - c.low
+        body = abs(c.close - c.open)
+        upper = c.high - max(c.open, c.close)
+        lower = min(c.open, c.close) - c.low
+        bull = c.close > c.open
+        return body, upper, lower, rng, bull
+
+    def detect_candle_patterns(self, candles, atr=None, lookback=6):
+        """
+        Find candlestick reversal patterns in the last `lookback` candles.
+
+        Returns a list of dicts, most recent first:
+          {'name','bias','barsAgo','time','strength','high','low'}
+        strength 1-3 (3 = strongest / most confirming).
+
+        Sizes are normalised by ATR so a "strong body" means the same thing
+        on EURUSD as on XAUUSD.
+        """
+        n = len(candles)
+        if n < 4:
+            return []
+        if atr is None or atr <= 0:
+            a = self._atr(candles, 14)
+            atr = a[-1] if a else 0
+        if atr <= 0:
+            return []
+
+        out = []
+        start = max(2, n - lookback)
+
+        for i in range(start, n):
+            c = candles[i]
+            p = candles[i-1]
+            pp = candles[i-2]
+            body, up, lo, rng, bull = self._cparts(c)
+            pbody, pup, plo, prng, pbull = self._cparts(p)
+            ppbody, _, _, pprng, ppbull = self._cparts(pp)
+            if rng <= 0:
+                continue
+            barsAgo = (n - 1) - i
+
+            def add(name, bias, strength):
+                out.append({'name': name, 'bias': bias, 'barsAgo': barsAgo,
+                            'time': c.time, 'strength': strength,
+                            'high': c.high, 'low': c.low})
+
+            # ---- 3-candle: Morning / Evening Star ----
+            # c1 strong opposing body, c2 small indecision body, c3 strong
+            # reversal body closing back past the midpoint of c1.
+            mid_pp = (pp.open + pp.close) / 2.0
+            small_mid = pbody <= max(prng * 0.4, atr * 0.25)
+            if (not ppbull and ppbody >= atr * 0.4 and small_mid
+                    and bull and body >= atr * 0.4 and c.close > mid_pp):
+                add('Morning Star', BULLISH, 3)
+            if (ppbull and ppbody >= atr * 0.4 and small_mid
+                    and not bull and body >= atr * 0.4 and c.close < mid_pp):
+                add('Evening Star', BEARISH, 3)
+
+            # ---- 2-candle: Engulfing ----
+            if (not pbull and bull and c.close >= p.open and c.open <= p.close
+                    and body > pbody and body >= atr * 0.3
+                    and pbody >= atr * 0.12):
+                add('Bullish Engulfing', BULLISH, 3)
+            if (pbull and not bull and c.close <= p.open and c.open >= p.close
+                    and body > pbody and body >= atr * 0.3
+                    and pbody >= atr * 0.12):
+                add('Bearish Engulfing', BEARISH, 3)
+
+            # ---- 2-candle: Piercing Line / Dark Cloud Cover ----
+            pmid = (p.open + p.close) / 2.0
+            if (not pbull and bull and c.open < p.close
+                    and c.close > pmid and c.close < p.open):
+                add('Piercing Line', BULLISH, 2)
+            if (pbull and not bull and c.open > p.close
+                    and c.close < pmid and c.close > p.open):
+                add('Dark Cloud Cover', BEARISH, 2)
+
+            # ---- 1-candle: Hammer / Shooting Star ----
+            if (lo >= body * 2.0 and lo >= rng * 0.55 and up <= rng * 0.20
+                    and body > 0 and rng >= atr * 0.4):
+                add('Hammer', BULLISH, 2)
+            if (up >= body * 2.0 and up >= rng * 0.55 and lo <= rng * 0.20
+                    and body > 0 and rng >= atr * 0.4):
+                add('Shooting Star', BEARISH, 2)
+
+            # ---- 2-candle: Harami (reversal warning, weaker) ----
+            if (not pbull and pbody >= atr * 0.5 and bull
+                    and c.high <= p.open and c.low >= p.close):
+                add('Bullish Harami', BULLISH, 1)
+            if (pbull and pbody >= atr * 0.5 and not bull
+                    and c.high <= p.close and c.low >= p.open):
+                add('Bearish Harami', BEARISH, 1)
+
+            # ---- 2-candle: Tweezer ----
+            tol = atr * 0.08
+            if (abs(c.low - p.low) <= tol and not pbull and bull
+                    and rng >= atr * 0.3):
+                add('Tweezer Bottom', BULLISH, 2)
+            if (abs(c.high - p.high) <= tol and pbull and not bull
+                    and rng >= atr * 0.3):
+                add('Tweezer Top', BEARISH, 2)
+
+            # ---- 3-candle: Three Soldiers / Crows ----
+            if (bull and pbull and ppbull
+                    and c.close > p.close > pp.close
+                    and body >= atr * 0.3 and pbody >= atr * 0.3
+                    and p.open <= pp.close and c.open <= p.close):
+                add('Three White Soldiers', BULLISH, 3)
+            if (not bull and not pbull and not ppbull
+                    and c.close < p.close < pp.close
+                    and body >= atr * 0.3 and pbody >= atr * 0.3
+                    and p.open >= pp.close and c.open >= p.close):
+                add('Three Black Crows', BEARISH, 3)
+
+        # newest first, strongest first within the same bar
+        out.sort(key=lambda d: (d['barsAgo'], -d['strength']))
+        return out
+
+    def best_pattern_at_zone(self, candles, bias, zone_lo, zone_hi,
+                             atr=None, lookback=6):
+        """
+        The strongest recent pattern that (a) agrees with `bias` and (b) was
+        printed while price was interacting with the zone. Returns None if
+        there isn't one.
+        """
+        pats = self.detect_candle_patterns(candles, atr=atr, lookback=lookback)
+        best = None
+        for p in pats:
+            if p['bias'] != bias:
+                continue
+            # the candle must have touched the zone
+            if zone_lo is not None and zone_hi is not None:
+                if p['high'] < zone_lo or p['low'] > zone_hi:
+                    continue
+            if best is None or p['strength'] > best['strength']:
+                best = p
+        return best
+
     def _detect_double_top_bottom(self, candles, bias, near_price, tolerance):
         """
         Double top (bearish) / double bottom (bullish) detection.
