@@ -337,7 +337,7 @@
     <div class="legend-item"><span class="legend-dot" style="background:var(--bull)"></span>4H Bullish OB + 15m align ↑</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--bear)"></span>4H Bearish OB + 15m align ↓</div>
     <div class="legend-item"><span class="legend-dot" style="background:var(--warn)"></span>High confluence 3+</div>
-    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /9</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--dim)"></span>Dots = confluence score /10</div>
   </div>
 
   <div class="controls">
@@ -443,6 +443,13 @@
         </div>
       </div>
       <div class="cg-item">
+        <span class="cg-chip">Candle pattern</span>
+        <div class="cg-text">
+          <div class="cg-def"><b>Candlestick reversal pattern.</b> Morning/Evening Star, Engulfing, Hammer, Shooting Star, Piercing Line, Dark Cloud, Tweezer, Harami, Three Soldiers/Crows — detected on the 15m first, then the 4H.</div>
+          <div class="cg-why"><b>Why:</b> only counted when the pattern prints <b>inside the order block</b> and points the same way as the setup. A pattern in open space is noise; the same pattern at a level you were already watching is the market showing rejection right where you expected it — that is your entry trigger.</div>
+        </div>
+      </div>
+      <div class="cg-item">
         <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">Daily / Weekly S/R</span>
         <div class="cg-text">
           <div class="cg-def"><b>Higher-timeframe location.</b> The 4H order block overlaps a support/resistance band built from <b>daily</b> or <b>weekly</b> candles — a level the market has respected for months, not hours.</div>
@@ -450,9 +457,9 @@
         </div>
       </div>
       <div class="cg-item" style="border-top:1px solid var(--border2)">
-        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">SCORE / 9</span>
+        <span class="cg-chip" style="color:var(--warn);border-color:var(--warn)">SCORE / 10</span>
         <div class="cg-text">
-          <div class="cg-def"><b>Confluence score.</b> 4H OB counts as the first point; each extra factor above adds one, up to 9. The dots on each card show the score.</div>
+          <div class="cg-def"><b>Confluence score.</b> 4H OB counts as the first point; each extra factor above adds one, up to 10. The dots on each card show the score.</div>
           <div class="cg-why"><b>Why:</b> more factors stacking in the same direction = a higher-quality setup. Use the CONF filter (2+ / 3+ / 4+) to hide the thin ones.</div>
         </div>
       </div>
@@ -474,7 +481,7 @@
         <thead><tr>
           <th class="mx-pair" style="text-align:left">PAIR</th>
           <th>TREND<div class="mx-sub">4H / D1</div></th>
-          <th>4H OB</th><th>15M</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
+          <th>4H OB</th><th>15M</th><th>PATTERN</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
         </tr></thead>
         <tbody id="mxBody"></tbody>
       </table>
@@ -545,7 +552,7 @@
       <input id="jrTp" placeholder="take profit">
       <input id="jrExit" placeholder="exit price">
       <select id="jrSession"><option value="">session…</option><option>Asian</option><option>London</option><option>NY</option></select>
-      <input id="jrConf" placeholder="conf /9" style="width:70px">
+      <input id="jrConf" placeholder="conf /10" style="width:70px">
       <input id="jrSug" placeholder="sug SL pips" style="width:96px">
       <input id="jrMfe" placeholder="max fav pips" style="width:100px" title="How far the trade ran in your favour before reversing — the key diagnostic">
       <input id="jrFactors" class="wide" placeholder="factors (comma)">
@@ -628,7 +635,7 @@ function detailPanel(x){
   add('TP', (x.tpPrice!=null?fmt(x.pair,x.tpPrice)+(x.rr!=null?'  ('+Number(x.rr).toFixed(1)+'R)':''):null));
   add('SESSION', x.session);
   add('4H TREND', x.htfTrend ? (x.htfTrend==='bull'?'▲ Bullish':'▼ Bearish') : null);
-  add('CONFLUENCE', (x.confluence!=null? x.confluence+'/9':null));
+  add('CONFLUENCE', (x.confluence!=null? x.confluence+'/10':null));
   const factors = Array.isArray(x.factors)? x.factors : [];
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
   let ai='';
@@ -661,7 +668,7 @@ function signalCard(x){
   const factors = Array.isArray(x.factors)? x.factors : [];
   const zone = fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh);
   let dots='';
-  for(let i=1;i<=9;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
+  for(let i=1;i<=10;i++){ dots += '<span class="cdot '+(i<=conf?'on '+bias:'')+'"></span>'; }
   const factorChips = factors.map(function(f){return '<span class="factor">'+f+'</span>';}).join('');
   const sl = (x.slPrice!=null)? fmt(x.pair,x.slPrice) : '—';
   const tp = (x.tpPrice!=null)? fmt(x.pair,x.tpPrice) : '—';
@@ -674,9 +681,13 @@ function signalCard(x){
   const sessTag = sess ? '<span class="sess-tag" style="color:'+sc+';border-color:'+sc+'">'+sess+'</span>' : '';
   var primeCls = x.srPrime? ' prime' : '';
   var primeBadge = x.srPrime? '<span class="prime-badge">★ PRIME LOCATION</span>' : '';
+  var patBadge = x.pattern
+    ? '<span class="tag" style="color:var(--warn);border-color:var(--warn)" title="'+
+      x.pattern+' printed at the zone on the '+(x.patternTf||'')+'">▮ '+x.pattern+'</span>'
+    : '';
   return '<div class="card '+bias+primeCls+'">'+
     '<div class="card-top">'+
-      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+primeBadge+
+      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+primeBadge+patBadge+
       '<span class="tag '+(isBull?'dir-bull':'dir-bear')+'">'+arrow+'</span>'+
       '<span class="tag type">'+safe(x.obType,'Swing')+'</span>'+
       '<span class="tag tf">'+safe(x.timeframe,'4H')+'</span>'+sessTag+
@@ -694,7 +705,7 @@ function signalCard(x){
       '<div style="margin-left:auto;color:var(--text3)">R:R '+rr+' · ref only</div>'+
     '</div>'+
     '<div class="conf-row">'+
-      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/9</span>'+
+      '<span style="color:'+(conf>=3?'var(--warn)':'var(--text3)')+';font-size:10px">CONF '+conf+'/10</span>'+
       '<div class="conf-dots">'+dots+'</div>'+
     '</div>'+
     dailySrLine(x)+
@@ -908,11 +919,16 @@ function factorBreakdown(x){
     var refTxt = (x.dblRef!=null)? ' (pullback '+fmt(x.pair,x.dblRef)+')' : '';
     row(x.dblKind, 'twin at <b>'+fmt(x.pair,x.dblA)+'</b> &amp; <b>'+fmt(x.pair,x.dblB)+'</b>'+refTxt);
   }
+  // candlestick reversal pattern printed at the zone
+  if(x.pattern){
+    row(x.pattern, 'printed on the <b>'+(x.patternTf||'')+'</b> at the zone'+
+      (x.patternBarsAgo!=null? ' ('+(x.patternBarsAgo===0?'latest bar':x.patternBarsAgo+' bars ago')+')':''));
+  }
   // 7. Major S/R — the 4H channel the OB sits on
   if(x.nearSr && x.srLo!=null){
     row('Major S/R', '4H band <b>'+fmt(x.pair,x.srLo)+' – '+fmt(x.pair,x.srHi)+'</b>');
   }
-  // 8/9. Higher-timeframe location — the strongest confluence
+  // 8/10. Higher-timeframe location — the strongest confluence
   if(x.srDLo!=null){
     row('Daily S/R', 'OB sits on daily band <b>'+fmt(x.pair,x.srDLo)+' – '+fmt(x.pair,x.srDHi)+'</b>'+
       (x.srPrime?' <span style="color:var(--warn)">(price in it)</span>':''));
@@ -960,7 +976,7 @@ function histRow(x){
     '<span class="mini" style="color:var(--text3);min-width:88px">'+tt+'</span>'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+(isBull?'var(--bull)':'var(--bear)')+'">'+(isBull?'▲':'▼')+' '+safe(x.obType,'')+'</span>'+
-    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/9</span>'+
+    '<span class="push-right" style="color:var(--warn);font-weight:700">'+conf+'/10</span>'+
   '</div>';
 }
 
@@ -1062,14 +1078,21 @@ function mxRow(r){
   }
 
   var conf = (r.confluence!=null)
-    ? '<span class="mx-conf" style="color:'+(r.confluence>=5?'var(--warn)':(r.confluence>=3?'var(--text)':'var(--text3)'))+'">'+r.confluence+'/9</span>'
+    ? '<span class="mx-conf" style="color:'+(r.confluence>=5?'var(--warn)':(r.confluence>=3?'var(--text)':'var(--text3)'))+'">'+r.confluence+'/10</span>'
     : '<span style="color:var(--dim)">–</span>';
   var star = r.prime? '<span style="color:var(--warn);font-size:13px">★</span>' : '<span style="color:var(--dim)">·</span>';
 
+  var pat;
+  if(r.pattern){
+    var pc = (r.bias==='bull')?'c-long':'c-short';
+    pat = '<span class="cell '+pc+'" title="'+r.pattern+' on the '+(r.patternTf||'')+
+          ' — printed at the zone">'+r.pattern.replace('Bullish ','').replace('Bearish ','')+
+          '</span>';
+  } else pat = mxCell('c-none','–');
   return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
     '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a></td>'+
     '<td>'+trend+'</td>'+
-    '<td>'+ob+'</td><td>'+ltf+'</td>'+
+    '<td>'+ob+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
     '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
     '<td>'+srCell(r.weekly, r.weeklyLo, r.weeklyHi)+'</td>'+
     '<td>'+conf+'</td><td>'+star+'</td>'+
@@ -1080,14 +1103,14 @@ async function loadMatrix(){
   const d = await getJSON('/matrix');
   const el = $('mxBody');
   if(!d || !Array.isArray(d.rows)){
-    if(el) el.innerHTML = '<tr><td colspan="8" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
+    if(el) el.innerHTML = '<tr><td colspan="9" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
     setText('c-mx', 0);
     return;
   }
   var rows = d.rows;
   if(mxOnlyActive) rows = rows.filter(function(r){ return r.ob!=='none'; });
   if(el) el.innerHTML = rows.length? rows.map(mxRow).join('')
-    : '<tr><td colspan="8" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
+    : '<tr><td colspan="9" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
   setText('c-mx', rows.length);
 }
 
@@ -1164,7 +1187,7 @@ function jrStageRender(){
         c('OPENED',t.openedAt)+c('CLOSED',t.closedAt)+
       '</div>'+
       '<div class="stage-acts">'+
-        '<input placeholder="conf /9" id="stConf'+i+'">'+
+        '<input placeholder="conf /10" id="stConf'+i+'">'+
         '<input placeholder="sug SL pips" id="stSug'+i+'">'+
         '<input placeholder="max fav pips" id="stMfe'+i+'">'+
         '<input placeholder="factors" id="stFac'+i+'" style="width:130px">'+
@@ -1324,7 +1347,7 @@ async function loadJournal(){
         '<span class="mini" style="color:var(--text2)">@ '+fmt(t.pair,t.entry)+'</span>'+
         (t.exit!=null?'<span class="mini" style="color:var(--text2)">→ '+fmt(t.pair,t.exit)+'</span>':'')+
         (t.session?'<span class="sess-tag" style="color:var(--text3);border-color:var(--border2)">'+t.session+'</span>':'')+
-        (t.confluence!=null?'<span class="mini" style="color:var(--warn)">'+t.confluence+'/9</span>':'')+
+        (t.confluence!=null?'<span class="mini" style="color:var(--warn)">'+t.confluence+'/10</span>':'')+
         '<span class="push-right" style="color:'+rCol+';font-weight:600">'+rTxt+'</span>'+
         '<span class="mini" style="color:var(--text3);cursor:pointer" onclick="jrDelete(\''+t.id+'\')">✕</span>'+
       '</div>';
@@ -1526,7 +1549,7 @@ function signalAlert(x){
   const toast = document.createElement('div');
   toast.className = 'alert-toast'+(isBull?'':' bear');
   toast.innerHTML = '<div class="t">'+(isBull?'▲ NEW LONG SIGNAL':'▼ NEW SHORT SIGNAL')+'</div>'+
-    '<div>'+safe(x.pair,'—')+' · '+safe(x.confluence,0)+'/9 confluence · tap to view chart</div>';
+    '<div>'+safe(x.pair,'—')+' · '+safe(x.confluence,0)+'/10 confluence · tap to view chart</div>';
   toast.onclick = function(){ window.open(tvLink(x.pair),'_blank'); toast.remove(); };
   document.body.appendChild(toast);
   requestAnimationFrame(function(){ toast.classList.add('show'); });
