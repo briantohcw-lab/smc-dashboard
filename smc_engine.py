@@ -19,6 +19,13 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# ── VERSION ──────────────────────────────────────────────────────────
+# Bump MINOR for behaviour changes, MAJOR for redesigns. Surfaced through
+# server.py /status and the dashboard footer so a deploy can be verified.
+ENGINE_VERSION = "3.2"
+ENGINE_DATE    = "2026-07-30"
+ENGINE_NOTES   = "OB strength grading A/B/C, respect scoring, candle patterns"
+
 BULLISH = 1
 BEARISH = -1
 
@@ -1033,6 +1040,203 @@ class SMCEngine:
                                 'ob_low': ob_low, 'break_idx': base + break_idx}
         return {'state': 'none'}
 
+    def ob_strength(self, ob, candles, respect=None):
+        """
+        Grade an order block A / B / C from measurable properties.
+
+        Not all order blocks are equal. The components, strongest signal first:
+
+          1. DISPLACEMENT — how hard price left the zone when it formed,
+             measured in ATR. A violent departure means real orders were
+             filled there; a sideways drift means nothing much happened.
+             This is the single best strength tell.
+          2. IMBALANCE — did the departure leave an unfilled gap (FVG)?
+             Price moving so fast it skips levels is the signature of
+             institutional flow.
+          3. FRESHNESS — untouched zones are stronger than ones already
+             traded through. Each tap consumes resting orders.
+          4. TIGHTNESS — a narrow zone gives a defined stop and better R:R.
+             A 200-pip "zone" is a guess, not a level.
+          5. RESPECT — historical bounces (from ob_respect_score), if given.
+
+        Returns {'grade','score','max','displacement','imbalance','fresh',
+                 'tightness','components'} — score is 0-10.
+        """
+        n = len(candles)
+        idx = getattr(ob, 'bar_index', None)
+        atr_series = self._atr(candles, 14)
+        atr = atr_series[-1] if atr_series else 0
+        comp = {}
+        score = 0
+
+        if atr <= 0 or n < 5:
+            return {'grade': '?', 'score': 0, 'max': 10, 'components': comp}
+
+        # locate the OB candle if bar_index wasn't supplied
+        if idx is None or idx < 0 or idx >= n:
+            idx = None
+            for i in range(n - 1, -1, -1):
+                if abs(candles[i].high - ob.high) < atr * 0.05 and \
+                   abs(candles[i].low - ob.low) < atr * 0.05:
+                    idx = i
+                    break
+        if idx is None:
+            idx = max(0, n - 20)
+
+        # ── 1. displacement: how far price travelled away within 5 bars ──
+        after = candles[idx + 1: min(n, idx + 6)]
+        disp_atr = 0.0
+        if after:
+            if ob.bias == BULLISH:
+                disp_atr = (max(c.high for c in after) - ob.high) / atr
+            else:
+                disp_atr = (ob.low - min(c.low for c in after)) / atr
+        disp_atr = max(0.0, disp_atr)
+        if disp_atr >= 3.0:   d = 4
+        elif disp_atr >= 2.0: d = 3
+        elif disp_atr >= 1.0: d = 2
+        elif disp_atr >= 0.5: d = 1
+        else:                 d = 0
+        comp['displacement'] = {'atr': round(disp_atr, 2), 'points': d, 'max': 4}
+        score += d
+
+        # ── 2. imbalance: unfilled 3-candle gap right after the OB ──
+        imb = False
+        for i in range(idx + 1, min(n, idx + 6)):
+            if i < 2:
+                continue
+            c0, c2 = candles[i], candles[i - 2]
+            if ob.bias == BULLISH and c0.low > c2.high and (c0.low - c2.high) >= atr * 0.2:
+                imb = True; break
+            if ob.bias == BEARISH and c2.low > c0.high and (c2.low - c0.high) >= atr * 0.2:
+                imb = True; break
+        comp['imbalance'] = {'found': imb, 'points': 2 if imb else 0, 'max': 2}
+        score += 2 if imb else 0
+
+        # ── 3. freshness: how many times price has been back into the zone ──
+        taps = 0
+        prev_in = False
+        for i in range(idx + 1, n):
+            inside = (candles[i].high >= ob.low and candles[i].low <= ob.high)
+            if inside and not prev_in:
+                taps += 1
+            prev_in = inside
+        f = 2 if taps == 0 else (1 if taps == 1 else 0)
+        comp['freshness'] = {'taps': taps, 'points': f, 'max': 2}
+        score += f
+
+        # ── 4. tightness: zone width relative to ATR ──
+        width_atr = (ob.high - ob.low) / atr if atr > 0 else 99
+        t = 1 if width_atr <= 1.5 else 0
+        comp['tightness'] = {'widthAtr': round(width_atr, 2), 'points': t, 'max': 1}
+        score += t
+
+        # ── 5. respect (optional, from ob_respect_score) ──
+        r = 0
+        if respect and respect.get('score'):
+            r = 1 if respect['score'] >= 2 else 0
+        comp['respect'] = {'points': r, 'max': 1}
+        score += r
+
+        grade = 'A' if score >= 7 else ('B' if score >= 4 else 'C')
+        return {'grade': grade, 'score': score, 'max': 10,
+                'displacement': round(disp_atr, 2), 'imbalance': imb,
+                'fresh': taps == 0, 'taps': taps,
+                'tightness': round(width_atr, 2), 'components': comp}
+
+    def ob_respect_score(self, ob, candles, min_bounce_atr=0.5, max_lookback=400):
+        """
+        How well has price RESPECTED this order block historically?
+
+        A tap that reverses away from the zone = a respect. A tap that closes
+        through it = a violation. Zones price keeps bouncing off are the ones
+        worth trading; zones it slices through are not, even though both look
+        identical on the chart until you count.
+
+        A 'respect' requires:
+          1. price entered the zone (wick or body), then
+          2. left it in the expected direction (up for demand, down for supply)
+          3. by at least `min_bounce_atr` * ATR — a real reaction, not a graze.
+
+        Returns {'respects','violations','score','lastBounceBars'}
+        where score 0-3:  0 = untested/broken, 3 = repeatedly respected.
+        """
+        n = len(candles)
+        if n < 10:
+            return {'respects': 0, 'violations': 0, 'score': 0, 'lastBounceBars': None}
+        atr_series = self._atr(candles, 14)
+        atr = atr_series[-1] if atr_series else 0
+        if atr <= 0:
+            return {'respects': 0, 'violations': 0, 'score': 0, 'lastBounceBars': None}
+        need = min_bounce_atr * atr
+
+        start = max(0, n - max_lookback)
+        respects = violations = 0
+        last_bounce = None
+        i = start
+        while i < n:
+            c = candles[i]
+            inside = (c.high >= ob.low and c.low <= ob.high)
+            if not inside:
+                i += 1
+                continue
+            # find the end of this contiguous tap
+            j = i
+            while j < n and candles[j].high >= ob.low and candles[j].low <= ob.high:
+                j += 1
+            # what happened in the ~12 bars after leaving the zone?
+            after = candles[j:min(n, j + 12)]
+            if not after:
+                break
+            if ob.bias == BULLISH:
+                # violation: closed decisively below the zone
+                if any(x.close < ob.low - need * 0.5 for x in after):
+                    violations += 1
+                elif max(x.high for x in after) >= ob.high + need:
+                    respects += 1
+                    last_bounce = (n - 1) - j
+            else:
+                if any(x.close > ob.high + need * 0.5 for x in after):
+                    violations += 1
+                elif min(x.low for x in after) <= ob.low - need:
+                    respects += 1
+                    last_bounce = (n - 1) - j
+            i = j + 1
+
+        # Violations matter: a zone price has closed through is damaged even
+        # if it held a few times before. Net respects drives the score.
+        net = respects - violations
+        if violations > 0 and respects == 0:
+            score = 0
+        elif net >= 3 and violations == 0:
+            score = 3
+        elif net >= 2:
+            score = 2
+        elif net >= 1:
+            score = 1
+        else:
+            score = 0
+        return {'respects': respects, 'violations': violations,
+                'score': score, 'lastBounceBars': last_bounce}
+
+    def approach_state(self, price, ob, pip, alert_pips=25.0):
+        """
+        Is price APPROACHING this zone (not yet in it)? This is the earliest
+        honest flag available — it says 'price is heading toward a level you
+        care about', which is when to start watching, not a prediction.
+
+        Returns {'state','distancePips'} with state in
+        'in' | 'approaching' | 'far'.
+        """
+        if pip <= 0:
+            return {'state': 'far', 'distancePips': None}
+        if ob.low <= price <= ob.high:
+            return {'state': 'in', 'distancePips': 0.0}
+        dist = (ob.low - price) if price < ob.low else (price - ob.high)
+        pips = dist / pip
+        return {'state': 'approaching' if pips <= alert_pips else 'far',
+                'distancePips': round(pips, 1)}
+
     def _count_ob_taps(self, ob, candles_15m, max_lookback=500):
         """
         Count how many DISTINCT times price has tapped (entered) this OB over its
@@ -1514,3 +1718,4 @@ class SMCEngine:
         if 'XAU' in p:  return 0.10
         if 'XAG' in p:  return 0.001
         return 0.0001
+      
