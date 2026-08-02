@@ -220,6 +220,11 @@
   .c-close{color:var(--accent);border:1px solid rgba(88,166,255,0.4)}
   .c-none {color:var(--dim)}
   .mx-conf{font-weight:700}
+  .grade{display:inline-block;min-width:22px;padding:3px 7px;border-radius:4px;
+    font-size:10px;font-weight:800;letter-spacing:0.06em}
+  .g-A{background:rgba(63,214,139,0.2);color:var(--bull);border:1px solid var(--bull)}
+  .g-B{background:rgba(240,180,41,0.16);color:var(--warn);border:1px solid var(--warn)}
+  .g-C{background:rgba(255,93,108,0.12);color:var(--bear);border:1px solid rgba(255,93,108,0.5)}
   .c-tbull{background:rgba(63,214,139,0.16);color:var(--bull);border:1px solid rgba(63,214,139,0.5)}
   .c-tbear{background:rgba(255,93,108,0.16);color:var(--bear);border:1px solid rgba(255,93,108,0.5)}
   .c-tnone{color:var(--dim);border:1px solid var(--border)}
@@ -306,6 +311,7 @@
     </div>
     <div class="live"><span class="dot"></span>LIVE</div>
     <div id="creditMeter" title="Twelve Data API credits used today">⛁ —/— credits</div>
+    <div id="verBadge" title="Deployed versions — tap for detail" style="font-size:9px;letter-spacing:0.06em;color:var(--text3);border:1px solid var(--border2);border-radius:6px;padding:5px 9px;cursor:pointer;white-space:nowrap">v— / —</div>
     <div id="clock">--:--:--</div>
   </header>
 
@@ -481,7 +487,7 @@
         <thead><tr>
           <th class="mx-pair" style="text-align:left">PAIR</th>
           <th>TREND<div class="mx-sub">4H / D1</div></th>
-          <th>4H OB</th><th>15M</th><th>PATTERN</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
+          <th>4H OB</th><th>GRADE</th><th>RESPECT</th><th>15M</th><th>PATTERN</th><th>DAILY S/R</th><th>WEEKLY S/R</th><th>CONF</th><th>★</th>
         </tr></thead>
         <tbody id="mxBody"></tbody>
       </table>
@@ -574,6 +580,10 @@
 
 <script>
 const API = "";
+// ── VERSION ── bump when this file changes; shown in the header and
+// cross-checked against the server so a half-finished deploy is obvious.
+const DASH_VERSION = "3.2";
+const DASH_DATE    = "2026-07-30";
 
 // ---- interactive state ----
 const filters = { dir: 'all', conf: 0 };
@@ -681,13 +691,16 @@ function signalCard(x){
   const sessTag = sess ? '<span class="sess-tag" style="color:'+sc+';border-color:'+sc+'">'+sess+'</span>' : '';
   var primeCls = x.srPrime? ' prime' : '';
   var primeBadge = x.srPrime? '<span class="prime-badge">★ PRIME LOCATION</span>' : '';
+  var gradeBadge = x.obGrade
+    ? '<span class="grade g-'+x.obGrade+'" title="OB strength '+x.obScore+'/10">'+x.obGrade+'</span>'
+    : '';
   var patBadge = x.pattern
     ? '<span class="tag" style="color:var(--warn);border-color:var(--warn)" title="'+
       x.pattern+' printed at the zone on the '+(x.patternTf||'')+'">▮ '+x.pattern+'</span>'
     : '';
   return '<div class="card '+bias+primeCls+'">'+
     '<div class="card-top">'+
-      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+primeBadge+patBadge+
+      '<span class="card-pair">'+safe(x.pair,'—')+'</span>'+gradeBadge+primeBadge+patBadge+
       '<span class="tag '+(isBull?'dir-bull':'dir-bear')+'">'+arrow+'</span>'+
       '<span class="tag type">'+safe(x.obType,'Swing')+'</span>'+
       '<span class="tag tf">'+safe(x.timeframe,'4H')+'</span>'+sessTag+
@@ -919,6 +932,21 @@ function factorBreakdown(x){
     var refTxt = (x.dblRef!=null)? ' (pullback '+fmt(x.pair,x.dblRef)+')' : '';
     row(x.dblKind, 'twin at <b>'+fmt(x.pair,x.dblA)+'</b> &amp; <b>'+fmt(x.pair,x.dblB)+'</b>'+refTxt);
   }
+  // OB strength: what makes this zone strong or weak
+  if(x.obGrade){
+    var bits = [];
+    if(x.obDisplacement!=null) bits.push('displacement <b>'+Number(x.obDisplacement).toFixed(1)+' ATR</b>');
+    if(x.obImbalance) bits.push('left an <b>FVG</b>');
+    bits.push(x.obFresh? '<b>fresh</b> (untapped)' : (x.obTaps+'x tapped'));
+    if(x.obWidthAtr!=null) bits.push('width '+Number(x.obWidthAtr).toFixed(1)+' ATR');
+    row('OB grade '+x.obGrade, bits.join(' · ')+' → <b>'+x.obScore+'/10</b>');
+  }
+  // how well this zone has held historically
+  if(x.respectScore!=null && x.respects>0){
+    row('Respected '+x.respects+'x', 'price reversed off this zone <b>'+x.respects+
+      '</b> time(s)'+(x.violations? ', broke it '+x.violations+'x':'')+
+      (x.lastBounceBars!=null? ' · last bounce '+x.lastBounceBars+' bars ago':''));
+  }
   // candlestick reversal pattern printed at the zone
   if(x.pattern){
     row(x.pattern, 'printed on the <b>'+(x.patternTf||'')+'</b> at the zone'+
@@ -1028,6 +1056,7 @@ async function loadArmed(){
 async function loadWatch(){
   const data = await getJSON('/watchlist');
   if(!Array.isArray(data)) return;
+  checkApproaching(data);
   const filtered = applyFilters(data);
   const el=$('watchList');
   if(el) el.innerHTML = filtered.length? filtered.map(watchRow).join('') : '<div class="empty">NO PAIRS APPROACHING<div class="sub">SCANNING…</div></div>';
@@ -1082,6 +1111,20 @@ function mxRow(r){
     : '<span style="color:var(--dim)">–</span>';
   var star = r.prime? '<span style="color:var(--warn);font-size:13px">★</span>' : '<span style="color:var(--dim)">·</span>';
 
+  // GRADE: composite OB strength A/B/C
+  var grd = r.obGrade
+    ? '<span class="grade g-'+r.obGrade+'" title="Order-block strength '+r.obGrade+
+      ' ('+r.obScore+'/10) — displacement, imbalance, freshness, tightness, respect">'+
+      r.obGrade+'</span>'
+    : mxCell('c-none','–');
+  // RESPECT: how many times price has bounced off this zone before
+  var resp;
+  if(r.respectScore!=null && r.respectScore>0){
+    var rc = r.respectScore>=3?'c-in':(r.respectScore>=2?'c-close':'c-near');
+    resp = '<span class="cell '+rc+'" title="Price has reversed off this zone '+
+           r.respects+' time(s) — a repeatedly respected level">'+
+           '\u25CF'.repeat(Math.min(3,r.respectScore))+' '+r.respects+'x</span>';
+  } else resp = mxCell('c-none','–');
   var pat;
   if(r.pattern){
     var pc = (r.bias==='bull')?'c-long':'c-short';
@@ -1092,7 +1135,7 @@ function mxRow(r){
   return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
     '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a></td>'+
     '<td>'+trend+'</td>'+
-    '<td>'+ob+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
+    '<td>'+ob+'</td><td>'+resp+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
     '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
     '<td>'+srCell(r.weekly, r.weeklyLo, r.weeklyHi)+'</td>'+
     '<td>'+conf+'</td><td>'+star+'</td>'+
@@ -1103,14 +1146,14 @@ async function loadMatrix(){
   const d = await getJSON('/matrix');
   const el = $('mxBody');
   if(!d || !Array.isArray(d.rows)){
-    if(el) el.innerHTML = '<tr><td colspan="9" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
+    if(el) el.innerHTML = '<tr><td colspan="11" style="padding:20px;color:var(--text3)">NO DATA YET — WAITING FOR FIRST SCAN…</td></tr>';
     setText('c-mx', 0);
     return;
   }
   var rows = d.rows;
   if(mxOnlyActive) rows = rows.filter(function(r){ return r.ob!=='none'; });
   if(el) el.innerHTML = rows.length? rows.map(mxRow).join('')
-    : '<tr><td colspan="9" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
+    : '<tr><td colspan="11" style="padding:20px;color:var(--text3)">NOTHING ACTIVE RIGHT NOW</td></tr>';
   setText('c-mx', rows.length);
 }
 
@@ -1475,6 +1518,33 @@ function updateSessions(){
   for(const id in map){ const e=$(id); if(e) e.classList.toggle('active', map[id]); }
 }
 
+async function loadVersions(){
+  const el = $('verBadge');
+  if(!el) return;
+  const v = await getJSON('/version');
+  if(!v || !v.server){
+    el.textContent = 'v'+DASH_VERSION+' / server ?';
+    el.style.color = 'var(--warn)'; el.style.borderColor = 'var(--warn)';
+    el.title = 'Dashboard v'+DASH_VERSION+' — server did not report a version. '+
+               'The deployed server.py is probably older than this dashboard.';
+    return;
+  }
+  var sv = v.server.version, ev = (v.engine||{}).version;
+  var match = (sv === DASH_VERSION);
+  el.textContent = 'v'+DASH_VERSION+' · srv '+sv+' · eng '+ev;
+  el.style.color = match? 'var(--text3)' : 'var(--warn)';
+  el.style.borderColor = match? 'var(--border2)' : 'var(--warn)';
+  var f = v.features||{}, on = [], off = [];
+  for(var k in f){ (f[k]?on:off).push(k); }
+  el.title = 'dashboard '+DASH_VERSION+' ('+DASH_DATE+')'+
+    '\nserver '+sv+' ('+v.server.date+') — '+v.server.notes+
+    '\nengine '+ev+' ('+(v.engine||{}).date+')'+
+    '\nAI '+((v.ai||{}).version||'—')+((v.ai||{}).enabled?' (enabled)':' (off)')+
+    (off.length? '\n\nNOT ACTIVE: '+off.join(', ') : '\n\nall features active')+
+    (match? '' : '\n\n⚠ VERSION MISMATCH — dashboard and server differ. Re-upload the older file.');
+  el.onclick = function(){ alert(el.title); };
+}
+
 async function loadStatus(){
   const s = await getJSON('/status');
   if(!s){ const p=$('pollStatus'); if(p) p.textContent='OFFLINE'; return; }
@@ -1528,7 +1598,44 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal(), loadMatrix() ]);
+  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal(), loadMatrix() ]);
+}
+
+// ---- APPROACH alerts: fire when price nears a zone, BEFORE it taps ----
+// This is the earliest honest warning available — it says "price is heading
+// into a level you care about", so you can be at the chart when it arrives.
+// It is NOT a prediction that the zone will hold.
+var knownApproach = null;
+const APPROACH_PIPS = 20;
+
+function checkApproaching(list){
+  if(!Array.isArray(list)) return;
+  var near = list.filter(function(w){
+    return w.distancePips!=null && Number(w.distancePips) <= APPROACH_PIPS;
+  });
+  var ids = near.map(function(w){ return w.pair+'|'+w.obLow; });
+  if(knownApproach !== null){
+    near.forEach(function(w){
+      var id = w.pair+'|'+w.obLow;
+      if(knownApproach.indexOf(id) < 0) approachAlert(w);
+    });
+  }
+  knownApproach = ids;
+}
+
+function approachAlert(w){
+  var isBull = w.bias==='bull';
+  var toast = document.createElement('div');
+  toast.className = 'alert-toast'+(isBull?'':' bear');
+  toast.style.borderColor = 'var(--accent)';
+  toast.innerHTML = '<div class="t" style="color:var(--accent)">\u25CE APPROACHING ZONE</div>'+
+    '<div>'+safe(w.pair,'—')+' \u00b7 '+Number(w.distancePips).toFixed(0)+
+    ' pips from a 4H '+(isBull?'demand':'supply')+' zone \u00b7 tap to chart</div>';
+  toast.onclick = function(){ window.open(tvLink(w.pair),'_blank'); toast.remove(); };
+  document.body.appendChild(toast);
+  requestAnimationFrame(function(){ toast.classList.add('show'); });
+  beep();
+  setTimeout(function(){ toast.classList.remove('show'); setTimeout(function(){toast.remove();},400); }, 12000);
 }
 
 // ---- signal alert (toast + optional beep) ----
