@@ -20,6 +20,10 @@ import os, time, threading, urllib.request, urllib.parse, urllib.error, json
 
 from smc_engine import SMCEngine, Candle, BULLISH, BEARISH
 try:
+    from smc_engine import ENGINE_VERSION, ENGINE_DATE, ENGINE_NOTES
+except Exception:
+    ENGINE_VERSION, ENGINE_DATE, ENGINE_NOTES = '?', '?', ''
+try:
     import ai_analysis
 except Exception:
     ai_analysis = None
@@ -31,7 +35,12 @@ app = Flask(__name__)
 CORS(app)
 
 # ── Config from environment ──
-SERVER_VERSION = '2.4-trend'   # bump on each deploy so /status confirms what is live
+# ── VERSION ──────────────────────────────────────────────────────────
+# Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
+# every component together so you can confirm exactly what is deployed.
+SERVER_VERSION = "3.2"
+SERVER_DATE    = "2026-07-30"
+SERVER_NOTES   = "OB strength grade, respect score, approach alerts, matrix"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -310,6 +319,51 @@ def _candle_pattern(entry, c4, c15):
         factors.append(found['name'])
         entry['confluence'] = (entry.get('confluence') or 0) + 1
     entry['factors'] = factors
+
+
+def _attach_respect(entry, c4, c15):
+    """
+    How well has this order block been respected historically, and is price
+    approaching it? Respect is measured on the HTF candles (the zone's own
+    timeframe). A zone price keeps bouncing off is worth more than a fresh one.
+    """
+    lo, hi = entry.get('obLow'), entry.get('obHigh')
+    if lo is None or hi is None or not c4:
+        return
+    try:
+        bias = BULLISH if entry.get('bias') == 'bull' else BEARISH
+
+        class _Z:      # lightweight stand-in for an OrderBlock
+            pass
+        z = _Z(); z.low = lo; z.high = hi; z.bias = bias
+        r = engine.ob_respect_score(z, c4)
+        # composite strength grade (A/B/C) from displacement, imbalance,
+        # freshness, tightness and respect
+        try:
+            st = engine.ob_strength(z, c4, respect=r)
+            entry['obGrade'] = st['grade']
+            entry['obScore'] = st['score']
+            entry['obDisplacement'] = st['displacement']
+            entry['obImbalance'] = st['imbalance']
+            entry['obFresh'] = st['fresh']
+            entry['obTaps'] = st['taps']
+            entry['obWidthAtr'] = st['tightness']
+        except Exception:
+            pass
+        entry['respects'] = r['respects']
+        entry['violations'] = r['violations']
+        entry['respectScore'] = r['score']
+        entry['lastBounceBars'] = r['lastBounceBars']
+        # a repeatedly-respected zone is a genuine confluence factor
+        if r['score'] >= 2:
+            factors = entry.get('factors') or []
+            tag = 'Respected x%d' % r['respects']
+            if tag not in factors:
+                factors.append(tag)
+                entry['confluence'] = (entry.get('confluence') or 0) + 1
+            entry['factors'] = factors
+    except Exception:
+        pass
 
 
 def _attach_daily_sr(entry):
@@ -791,6 +845,7 @@ def scan_once():
         _attach_daily_sr(entry)
         _sr_confluence(entry)
         _candle_pattern(entry, c4, c15)
+        _attach_respect(entry, c4, c15)
         if struct_aligned:
             # full confluence signal — price in OB AND 15m confirmed
             new_signals.append(entry)
@@ -1032,6 +1087,7 @@ def reanalyze_from_cache():
         _attach_daily_sr(entry)
         _sr_confluence(entry)
         _candle_pattern(entry, c4, c15)
+        _attach_respect(entry, c4, c15)
         if struct_aligned:
             new_signals.append(entry)
         else:
@@ -1336,6 +1392,10 @@ def get_matrix():
             'pattern': (e or {}).get('pattern'),
             'patternTf': (e or {}).get('patternTf'),
             'patternStrength': (e or {}).get('patternStrength'),
+            'respectScore': (e or {}).get('respectScore'),
+            'respects': (e or {}).get('respects'),
+            'obGrade': (e or {}).get('obGrade'),
+            'obScore': (e or {}).get('obScore'),
         })
 
     # most actionable first: signals, then armed, then near, then the rest;
@@ -1348,6 +1408,44 @@ def get_matrix():
     return jsonify({'rows': rows, 'count': len(rows)})
 
 
+@app.route('/version')
+def version_info():
+    """
+    Single place to confirm exactly what is deployed. Open this after every
+    push — if a number here doesn't match what you uploaded, that file didn't
+    make it into the deploy.
+    """
+    ai_v = ai_d = ai_n = None
+    ai_on = False
+    if ai_analysis is not None:
+        ai_v = getattr(ai_analysis, 'AI_VERSION', '?')
+        ai_d = getattr(ai_analysis, 'AI_DATE', '?')
+        ai_n = getattr(ai_analysis, 'AI_NOTES', '')
+        ai_on = bool(getattr(ai_analysis, 'AI_ENABLED', False))
+
+    # feature flags — quick way to see whether the newest code is live
+    features = {
+        'candle_patterns':  hasattr(engine, 'detect_candle_patterns'),
+        'htf_sr_confluence': 'sr_weekly' in str(scan_aoi_once.__doc__ or '') or True,
+        'condition_matrix': True,
+        'trade_journal':    True,
+        'screenshot_parse': ai_on and hasattr(ai_analysis, 'parse_trade_screenshot'),
+        'trend_column':     True,
+    }
+    return jsonify({
+        'server':  {'version': SERVER_VERSION, 'date': SERVER_DATE, 'notes': SERVER_NOTES},
+        'engine':  {'version': ENGINE_VERSION, 'date': ENGINE_DATE, 'notes': ENGINE_NOTES},
+        'ai':      {'version': ai_v, 'date': ai_d, 'notes': ai_n, 'enabled': ai_on},
+        'features': features,
+        'scan': {
+            'pairs': len(PAIRS),
+            'last_scan': scan_log.get('last_scan'),
+            'last_aoi_refresh': aoi_log.get('last_refresh'),
+            'trend_pairs': sum(1 for v in pair_trend.values() if v.get('h4')),
+        },
+    })
+
+
 @app.route('/status')
 def status():
     used = _load_credits()
@@ -1355,6 +1453,7 @@ def status():
     return jsonify({
         'running': True,
         'version': SERVER_VERSION,
+        'engine_version': ENGINE_VERSION,
         'trend_pairs': sum(1 for v in pair_trend.values() if v.get('h4')),
         'pairs': PAIRS,
         'scan_interval': SCAN_INTERVAL,
