@@ -582,7 +582,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "3.2";
+const DASH_VERSION = "3.4";
 const DASH_DATE    = "2026-07-30";
 
 // ---- interactive state ----
@@ -1133,7 +1133,11 @@ function mxRow(r){
           '</span>';
   } else pat = mxCell('c-none','–');
   return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
-    '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a></td>'+
+    '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a>'+
+      (r.tf && r.tf.htf && String(r.tf.htf).toLowerCase()!=='4h'
+        ? '<div class="mx-sub" style="color:var(--accent)">'+String(r.tf.htf).toUpperCase()+'/'+String(r.tf.ltf).replace('min','m').toUpperCase()+'</div>'
+        : '')+
+    '</td>'+
     '<td>'+trend+'</td>'+
     '<td>'+ob+'</td><td>'+resp+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
     '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
