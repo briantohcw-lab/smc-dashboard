@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "3.2"
+SERVER_VERSION = "3.4"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "OB strength grade, respect score, approach alerts, matrix"
+SERVER_NOTES   = "per-pair timeframes (gold on 1H), backtest, OB grading"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -57,6 +57,38 @@ LTF_BARS      = int(os.environ.get('LTF_BARS', '120'))   # LTF candles to fetch
 #                       HTF=1day LTF=1h  (pure swing)
 HTF_TF = os.environ.get('HTF_TF', '4h').strip()
 LTF_TF = os.environ.get('LTF_TF', '15min').strip()
+
+# ── Per-pair timeframe overrides ──────────────────────────────────────
+# Some instruments work better on a different higher timeframe. Backtesting
+# 11 months of gold across three broker feeds showed 4H produced only ~12
+# trades, while 1H produced ~106 with a higher win rate and better expectancy,
+# consistently on all three feeds. So gold runs 1H/15m and everything else
+# keeps 4H/15m.
+#
+# Format: "SYMBOL:HTF:LTF,SYMBOL:HTF:LTF"  e.g. "XAU/USD:1h:15min"
+# Set PAIR_TF="" to disable all overrides and run every pair on HTF_TF/LTF_TF.
+_default_overrides = 'XAU/USD:1h:15min'
+PAIR_TF = {}
+for _item in os.environ.get('PAIR_TF', _default_overrides).split(','):
+    _item = _item.strip()
+    if not _item:
+        continue
+    _parts = _item.split(':')
+    if len(_parts) == 3:
+        PAIR_TF[_parts[0].strip().upper()] = (_parts[1].strip(), _parts[2].strip())
+
+
+def tf_for(symbol):
+    """(htf, ltf) for this symbol — the override if one exists, else the global
+    default. Matches with or without the slash, so XAU/USD and XAUUSD both work."""
+    s = (symbol or '').upper()
+    if s in PAIR_TF:
+        return PAIR_TF[s]
+    s2 = s.replace('/', '')
+    for k, v in PAIR_TF.items():
+        if k.replace('/', '') == s2:
+            return v
+    return (HTF_TF, LTF_TF)
 
 # ── Candle timezone anchoring ──
 # This controls where intraday candle boundaries fall. It matters a LOT for 4H
@@ -175,6 +207,8 @@ _aoi_lock = threading.Lock()
 # latest price per clean pair, updated by the OB scanner each cycle; used by the
 # AOI panel to place price against zones live (free — no extra fetch).
 last_prices_global = {}
+# which timeframes each pair was actually scanned on (for the dashboard)
+pair_tf_used = {}
 # Per-pair market trend, so the matrix can show a direction for EVERY pair —
 # not just ones that happen to be sitting in an order block.
 #   h4 = 4H swing trend (from the OB scanner, refreshed each scan)
@@ -740,9 +774,10 @@ def scan_once():
     scan_candles = {}   # symbol(with slash) -> (c4, c15, sr_channels) for reanalyze
     for idx, symbol in enumerate(ordered):
         scan_log['current_pair'] = symbol
-        c4 = fetch_candles(symbol, HTF_TF, HTF_BARS)
+        htf_tf, ltf_tf = tf_for(symbol)       # per-pair override (gold = 1h)
+        c4 = fetch_candles(symbol, htf_tf, HTF_BARS)
         time.sleep(THROTTLE)
-        c15 = fetch_candles(symbol, LTF_TF, LTF_BARS)
+        c15 = fetch_candles(symbol, ltf_tf, LTF_BARS)
         time.sleep(THROTTLE)
         add_credits(2)
         scan_log['progress'] = idx + 1
@@ -752,6 +787,7 @@ def scan_once():
             scan_log['dropped_pairs'] = dropped
             continue
         scanned += 1
+        pair_tf_used[symbol.replace('/', '')] = {'htf': htf_tf, 'ltf': ltf_tf}
         candle_cache[symbol.replace('/', '')] = (c4, c15)
 
         # major S/R channels from the 4H candles we already have (no extra API)
@@ -1394,6 +1430,7 @@ def get_matrix():
             'patternStrength': (e or {}).get('patternStrength'),
             'respectScore': (e or {}).get('respectScore'),
             'respects': (e or {}).get('respects'),
+            'tf': pair_tf_used.get(clean, {'htf': HTF_TF, 'ltf': LTF_TF}),
             'obGrade': (e or {}).get('obGrade'),
             'obScore': (e or {}).get('obScore'),
         })
@@ -1464,6 +1501,7 @@ def status():
         'credits_remaining': max(0, DAILY_CREDIT_LIMIT - used),
         'htf': HTF_TF,
         'ltf': LTF_TF,
+        'pair_tf_overrides': {k: {'htf': v[0], 'ltf': v[1]} for k, v in PAIR_TF.items()},
         'candle_tz': CANDLE_TZ,
         'tracker': tracker_stats,
     })
@@ -1845,20 +1883,40 @@ def set_settings():
 @app.route('/backtest')
 def backtest():
     """
-    Replay the past N days bar-by-bar and list every point where a pair
-    reached >= min confluence. Use ?days=7&min=2  (defaults shown).
-    Returns JSON; also renders a simple HTML table if &html=1.
+    TRADE-LEVEL BACKTEST on the Twelve Data feed.
 
-    NOTE: this is heavier on the API (one 4H + one 15m fetch per pair, with
-    larger outputsize). It does NOT loop the API per bar — it fetches once
-    per pair then replays locally, so it stays cheap on credits.
+    Replays history bar by bar, opens a simulated trade whenever the strategy
+    produces a signal, then walks forward to see what actually happened:
+    stop hit, target hit, or still open at the end. Reports the same metrics
+    as the trade journal so backtest and live results are comparable.
+
+    Query params:
+      days=30          how far back to replay
+      min=3            minimum confluence to take the trade
+      trail=1          apply the trailing rule (0 = fixed SL/TP only)
+      activate=1.0     start trailing after +this many R
+      trailr=0.5       trail distance in R
+      grade=A          only take setups of this OB grade or better (A|B|C)
+      pairs=EUR/USD,.. override the pair list
+      html=1           render a readable table instead of JSON
+
+    API cost: 2 credits per pair (one HTF + one LTF fetch), then everything
+    is replayed locally — it does NOT call the API per bar.
     """
     from flask import request, Response
-    days = int(request.args.get('days', 7))
-    min_conf = int(request.args.get('min', 2))
+    days     = int(request.args.get('days', 30))
+    min_conf = int(request.args.get('min', 3))
+    use_trail = request.args.get('trail', '1') not in ('0', 'false', 'False')
+    act_r    = float(request.args.get('activate', 1.0))
+    trail_r  = float(request.args.get('trailr', 0.5))
     want_html = request.args.get('html', '0') == '1'
+    grade_min = (request.args.get('grade') or '').strip().upper()
+    # entry mode:
+    #   'signal' = strict — requires the 15m break-and-retest (rare)
+    #   'armed'  = enter when price is inside the 4H OB with enough confluence
+    mode = (request.args.get('mode') or 'armed').strip().lower()
+    pair_list = [p.strip() for p in (request.args.get('pairs') or '').split(',') if p.strip()] or PAIRS
 
-    # bars-per-day depends on the timeframe interval
     def bars_per_day(tf):
         tf = tf.lower().strip()
         mins = {'1min':1,'5min':5,'15min':15,'30min':30,'45min':45,
@@ -1867,94 +1925,222 @@ def backtest():
 
     ltf_pd = bars_per_day(LTF_TF)
     htf_pd = bars_per_day(HTF_TF)
-    ltf_needed = days * ltf_pd + 220
-    htf_needed = days * htf_pd + 320     # HTF bars over N days + warmup
+    ltf_needed = days * ltf_pd + 260
+    htf_needed = days * htf_pd + 340
 
-    events = []
-    errors = []
-
+    grade_rank = {'A': 3, 'B': 2, 'C': 1}
+    trades, errors = [], []
     throttle = float(os.environ.get('API_THROTTLE_SEC', '8'))
-    for symbol in PAIRS:
-        c4_all  = fetch_candles(symbol, HTF_TF, min(htf_needed, 5000))
+
+    for symbol in pair_list:
+        bt_htf, bt_ltf = tf_for(symbol)     # honour per-pair overrides
+        c4_all  = fetch_candles(symbol, bt_htf, min(htf_needed, 5000))
         time.sleep(throttle)
-        c15_all = fetch_candles(symbol, LTF_TF, min(ltf_needed, 5000))
+        c15_all = fetch_candles(symbol, bt_ltf, min(ltf_needed, 5000))
         time.sleep(throttle)
         add_credits(2)
         if not c4_all or not c15_all:
-            errors.append(symbol)
+            errors.append(symbol.replace('/', ''))
             continue
 
-        # warmup: don't start replaying until we have enough history
-        warm15 = engine.internal_length + 5
-        start_i = max(warm15, len(c15_all) - days * ltf_pd)  # only last N days
+        pip = engine._pip_size(symbol)
+        warm = engine.internal_length + 5
+        start_i = max(warm, len(c15_all) - days * ltf_pd)
+        open_trade = None
         last_key = None
 
         for i in range(start_i, len(c15_all)):
+            bar = c15_all[i]
+
+            # ── manage an open simulated trade on this bar ──
+            if open_trade is not None:
+                t = open_trade
+                is_long = (t['dir'] == 'long')
+                # track the best excursion (for the MFE diagnosis)
+                fav = (bar.high - t['entry']) if is_long else (t['entry'] - bar.low)
+                if fav > t['mfe']:
+                    t['mfe'] = fav
+                # trailing: once +act_r is reached, trail by trail_r
+                if use_trail and t['risk'] > 0 and fav >= t['risk'] * act_r:
+                    if is_long:
+                        newsl = bar.high - t['risk'] * trail_r
+                        if newsl > t['sl']:
+                            t['sl'] = newsl; t['trailed'] = True
+                    else:
+                        newsl = bar.low + t['risk'] * trail_r
+                        if newsl < t['sl']:
+                            t['sl'] = newsl; t['trailed'] = True
+                # exits — conservative: if a bar spans both, count the stop
+                hit_sl = (bar.low <= t['sl']) if is_long else (bar.high >= t['sl'])
+                hit_tp = (bar.high >= t['tp']) if is_long else (bar.low <= t['tp'])
+                if hit_sl or hit_tp:
+                    exitp = t['sl'] if hit_sl else t['tp']
+                    move = (exitp - t['entry']) if is_long else (t['entry'] - exitp)
+                    t['exit'] = round(exitp, 5)
+                    t['r'] = round(move / t['risk'], 2) if t['risk'] > 0 else None
+                    t['mfeR'] = round(t['mfe'] / t['risk'], 2) if t['risk'] > 0 else None
+                    t['outcome'] = ('sl' if hit_sl else 'tp')
+                    t['bars'] = i - t['openIdx']
+                    t['closedAt'] = datetime.fromtimestamp(bar.time, tz=timezone.utc).isoformat()
+                    trades.append(t)
+                    open_trade = None
+                else:
+                    continue     # stay in the trade; don't look for a new one
+
+            # ── look for a new signal ──
             c15_slice = c15_all[:i+1]
-            cutoff = c15_slice[-1].time
-            # 4H candles available "as of" this 15m bar
+            cutoff = bar.time
             c4_slice = [c for c in c4_all if c.time <= cutoff]
             if len(c4_slice) < engine.swing_length + 5:
                 continue
-
-            res = engine.analyze(symbol, c4_slice, c15_slice)
+            try:
+                res = engine.analyze(symbol, c4_slice, c15_slice)
+            except Exception:
+                continue
             if res is None or not res.in_ob:
+                continue
+            if mode == 'signal' and not res.struct_aligned:
                 continue
             if res.confluence < min_conf:
                 continue
-
-            # dedupe: one event per (pair, bias, zone, score) state
-            key = f"{symbol}|{res.ob_bias}|{round(res.ob_low,5)}|{res.confluence}"
-            if key == last_key:
+            if not res.sl_price or not res.tp_price:
                 continue
+
+            # optional OB-grade filter
+            gr = None
+            if grade_min:
+                try:
+                    class _Z: pass
+                    z = _Z(); z.low = res.ob_low; z.high = res.ob_high
+                    z.bias = res.ob_bias; z.bar_index = None
+                    gr = engine.ob_strength(z, c4_slice)['grade']
+                    if grade_rank.get(gr, 0) < grade_rank.get(grade_min, 0):
+                        continue
+                except Exception:
+                    pass
+
+            key = f"{symbol}|{res.ob_bias}|{round(res.ob_low,5)}"
+            if key == last_key:
+                continue          # same zone, already traded
             last_key = key
 
-            events.append({
-                'pair':       symbol.replace('/', ''),
-                'time':       datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat(),
-                'bias':       'bull' if res.ob_bias == BULLISH else 'bear',
-                'obType':     res.ob_type,
-                'price':      round(res.price, 5),
-                'obHigh':     round(res.ob_high, 5),
-                'obLow':      round(res.ob_low, 5),
-                'confluence': res.confluence,
-                'factors':    res.factors,
-                'fvg':        res.fvg,
-                'eqhl':       res.eqhl,
-                'sweep':      res.liquidity_sweep,
-            })
+            is_long = (res.ob_bias == BULLISH)
+            entry = res.price
+            risk = abs(entry - res.sl_price)
+            if risk <= 0:
+                continue
+            open_trade = {
+                'pair': symbol.replace('/', ''),
+                'dir': 'long' if is_long else 'short',
+                'entry': round(entry, 5),
+                'sl': res.sl_price, 'tp': res.tp_price,
+                'origSl': res.sl_price, 'risk': risk,
+                'slPips': round(risk / pip, 1) if pip else None,
+                'confluence': res.confluence, 'factors': res.factors,
+                'grade': gr, 'session': res.session,
+                'openIdx': i, 'mfe': 0.0, 'trailed': False,
+                'openedAt': datetime.fromtimestamp(bar.time, tz=timezone.utc).isoformat(),
+            }
 
-    # newest first
-    events.sort(key=lambda e: e['time'], reverse=True)
+    # ── aggregate ──
+    closed = [t for t in trades if t.get('r') is not None]
+    rs = [t['r'] for t in closed]
+    wins = [t for t in closed if t['r'] > 0]
+    losses = [t for t in closed if t['r'] <= 0]
+    gross_win = sum(t['r'] for t in wins)
+    gross_loss = abs(sum(t['r'] for t in losses))
+    mfes = [t['mfeR'] for t in closed if t.get('mfeR') is not None]
+
+    def group(keyfn):
+        g = {}
+        for t in closed:
+            k = keyfn(t)
+            if k in (None, ''):
+                continue
+            g.setdefault(str(k), []).append(t)
+        out = []
+        for k, ts in g.items():
+            r2 = [x['r'] for x in ts]
+            w = sum(1 for x in ts if x['r'] > 0)
+            out.append({'key': k, 'n': len(ts), 'wins': w,
+                        'winRate': round(100*w/len(ts)),
+                        'avgR': round(sum(r2)/len(r2), 2),
+                        'totalR': round(sum(r2), 2)})
+        out.sort(key=lambda x: x['totalR'], reverse=True)
+        return out
+
+    summary = {
+        'trades': len(closed),
+        'wins': len(wins), 'losses': len(losses),
+        'winRate': round(100*len(wins)/len(closed)) if closed else None,
+        'avgR': round(sum(rs)/len(rs), 2) if rs else None,
+        'totalR': round(sum(rs), 2) if rs else None,
+        'bestR': round(max(rs), 2) if rs else None,
+        'worstR': round(min(rs), 2) if rs else None,
+        'profitFactor': round(gross_win/gross_loss, 2) if gross_loss > 0 else None,
+        'avgMfeR': round(sum(mfes)/len(mfes), 2) if mfes else None,
+        'neverReached1R': sum(1 for m in mfes if m < 1.0),
+        'byGrade': group(lambda t: t.get('grade')),
+        'bySession': group(lambda t: t.get('session')),
+        'byConfluence': group(lambda t: t.get('confluence')),
+        'byPair': group(lambda t: t.get('pair')),
+    }
+    settings = {'days': days, 'mode': mode, 'minConfluence': min_conf, 'trailing': use_trail,
+                'activateR': act_r, 'trailR': trail_r, 'gradeMin': grade_min or None,
+                'pairs': len(pair_list), 'htf': HTF_TF, 'ltf': LTF_TF,
+                'errors': errors}
 
     if not want_html:
-        return jsonify({
-            'days': days, 'min_confluence': min_conf,
-            'pairs': len(PAIRS), 'errors': errors,
-            'event_count': len(events), 'events': events,
-        })
+        return jsonify({'settings': settings, 'summary': summary,
+                        'trades': sorted(closed, key=lambda t: t['openedAt'], reverse=True)[:200]})
 
-    # simple HTML table for easy reading on phone
+    def tbl(title, rows):
+        if not rows: return ''
+        body = ''.join(
+            f"<tr><td>{g['key']}</td><td>{g['n']}</td><td>{g['winRate']}%</td>"
+            f"<td>{g['avgR']}R</td><td style='color:{'#3fd68b' if g['totalR']>0 else '#ff5d6c'}'>{g['totalR']}R</td></tr>"
+            for g in rows)
+        return (f"<h3>{title}</h3><table><tr><th>group</th><th>n</th><th>win%</th>"
+                f"<th>avg R</th><th>total R</th></tr>{body}</table>")
+
+    wr = summary['winRate']
     rows = ''.join(
-        f"<tr><td>{e['time'][5:16].replace('T',' ')}</td>"
-        f"<td><b>{e['pair']}</b></td>"
-        f"<td style='color:{'#00d97e' if e['bias']=='bull' else '#ff4466'}'>"
-        f"{'LONG' if e['bias']=='bull' else 'SHORT'}</td>"
-        f"<td>{e['obType']}</td>"
-        f"<td style='text-align:center'>{e['confluence']}/5</td>"
-        f"<td style='font-size:11px;color:#7a8999'>{'+'.join(e['factors'] or [])}</td></tr>"
-        for e in events
-    )
+        f"<tr><td>{t['openedAt'][:16].replace('T',' ')}</td><td><b>{t['pair']}</b></td>"
+        f"<td style='color:{'#3fd68b' if t['dir']=='long' else '#ff5d6c'}'>{t['dir'].upper()}</td>"
+        f"<td>{t.get('grade') or '-'}</td><td>{t['confluence']}</td>"
+        f"<td>{t['slPips']}p</td><td>{t['outcome'].upper()}</td>"
+        f"<td style='color:{'#3fd68b' if t['r']>0 else '#ff5d6c'}'>{t['r']}R</td>"
+        f"<td>{t.get('mfeR')}R</td><td>{t['bars']}</td></tr>" for t in closed[:300])
     html = f"""<!DOCTYPE html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>
-    <style>body{{background:#0a0c0f;color:#c8d3e0;font-family:monospace;font-size:13px;padding:12px}}
-    h2{{color:#fff}} table{{width:100%;border-collapse:collapse}} 
+    <style>body{{background:#07090d;color:#c8d3e0;font-family:monospace;font-size:13px;padding:14px}}
+    h2,h3{{color:#fff}} table{{width:100%;border-collapse:collapse;margin-bottom:18px}}
     td,th{{padding:6px 8px;border-bottom:1px solid #1e2530;text-align:left}}
-    th{{color:#7a8999;font-size:10px;letter-spacing:0.1em}}</style></head><body>
-    <h2>Backtest — last {days} days, confluence ≥ {min_conf}</h2>
-    <p style='color:#7a8999'>{len(events)} events across {len(PAIRS)} pairs.
-    {('Errors: '+', '.join(errors)) if errors else ''}</p>
-    <table><tr><th>Time UTC</th><th>Pair</th><th>Dir</th><th>OB</th><th>Conf</th><th>Factors</th></tr>
-    {rows}</table></body></html>"""
+    th{{color:#7a8999;font-size:10px;letter-spacing:0.1em}}
+    .kpi{{display:inline-block;margin-right:22px}} .kpi b{{font-size:20px;display:block;color:#fff}}
+    .kpi span{{font-size:9px;color:#5a6877;letter-spacing:0.1em}}</style></head><body>
+    <h2>SMC Backtest — {days} days, confluence &ge; {min_conf}{', grade ' + grade_min + '+' if grade_min else ''}</h2>
+    <p style='color:#7a8999'>entry mode: <b>{mode}</b> &middot; trailing: {'ON (activate ' + str(act_r) + 'R, trail ' + str(trail_r) + 'R)' if use_trail else 'OFF'}
+     &middot; {settings['pairs']} pairs &middot; {HTF_TF}/{LTF_TF}
+     {('&middot; no data: ' + ', '.join(errors)) if errors else ''}</p>
+    <div>
+      <div class=kpi><b style='color:{"#3fd68b" if (wr or 0)>=50 else "#ff5d6c"}'>{wr if wr is not None else '-'}%</b><span>WIN RATE</span></div>
+      <div class=kpi><b style='color:{"#3fd68b" if (summary['totalR'] or 0)>0 else "#ff5d6c"}'>{summary['totalR']}R</b><span>TOTAL R</span></div>
+      <div class=kpi><b>{summary['avgR']}R</b><span>AVG R</span></div>
+      <div class=kpi><b>{summary['profitFactor']}</b><span>PROFIT FACTOR</span></div>
+      <div class=kpi><b>{summary['trades']}</b><span>TRADES</span></div>
+      <div class=kpi><b>{summary['avgMfeR']}R</b><span>AVG MFE</span></div>
+      <div class=kpi><b>{summary['neverReached1R']}</b><span>NEVER HIT 1R</span></div>
+    </div>
+    <p style='color:#f0b429;font-size:11px'>Simulated on the Twelve Data feed. No spread, commission or slippage —
+    real results will be worse. When a bar spans both SL and TP it is counted as a LOSS.</p>
+    {tbl('BY OB GRADE', summary['byGrade'])}
+    {tbl('BY CONFLUENCE', summary['byConfluence'])}
+    {tbl('BY SESSION', summary['bySession'])}
+    {tbl('BY PAIR', summary['byPair'])}
+    <h3>TRADES</h3>
+    <table><tr><th>opened</th><th>pair</th><th>dir</th><th>grade</th><th>conf</th>
+    <th>stop</th><th>exit</th><th>R</th><th>MFE</th><th>bars</th></tr>{rows}</table>
+    </body></html>"""
     return Response(html, mimetype='text/html')
 
 
