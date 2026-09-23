@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "3.4"
+SERVER_VERSION = "3.6"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "per-pair timeframes (gold on 1H), backtest, OB grading"
+SERVER_NOTES   = "matrix column fix, armed direction, backtested defaults"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -55,6 +55,15 @@ LTF_BARS      = int(os.environ.get('LTF_BARS', '120'))   # LTF candles to fetch
 # Common SMC pairings:  HTF=4h LTF=15min (default, swing-intraday)
 #                       HTF=1h LTF=5min  (intraday/scalp)
 #                       HTF=1day LTF=1h  (pure swing)
+# Session filter: trades opened during the thin Asian session (00:00-07:00
+# UTC) returned 0.182R vs 0.938R for the rest. Skipping them improved results
+# on 9 of 10 files. Set SKIP_HOURS="" to disable, or list other UTC hours.
+SKIP_HOURS = set()
+for _h in os.environ.get('SKIP_HOURS', '0,1,2,3,4,5,6').split(','):
+    _h = _h.strip()
+    if _h.isdigit():
+        SKIP_HOURS.add(int(_h))
+
 HTF_TF = os.environ.get('HTF_TF', '4h').strip()
 LTF_TF = os.environ.get('LTF_TF', '15min').strip()
 
@@ -101,7 +110,9 @@ CANDLE_TZ = os.environ.get('CANDLE_TZ', 'America/New_York').strip()
 
 # first_tap_only: only arm on the FIRST tap of a 4H OB (skip already-mitigated
 # zones that price has tapped before). Set env FIRST_TAP_ONLY=0 to disable.
-FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '1').strip() not in ('0', 'false', 'False')
+# Backtest: first-tap-only returned -0.041R and was profitable on only 4/10
+# files, versus +0.445R taking every tap. Default is now OFF.
+FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '0').strip() not in ('0', 'false', 'False')
 
 # mitigation_window: how many 15m bars an armed setup stays active after price
 # taps the 4H OB (waiting for 15m confirmation), even if price wicked out.
@@ -115,7 +126,10 @@ MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '40'))
 # Requiring real penetration keeps armed pairs genuinely near the zone on your
 # chart. 0.0 = old edge-touch behaviour; 0.25 = must be 25% into the zone.
 # Raise for stricter/fewer arms, lower to keep more. Env: ARM_PENETRATION.
-ARM_PENETRATION = float(os.environ.get('ARM_PENETRATION', '0.25'))
+# Backtested over 11 months / 10 broker files: entering deeper into the OB
+# improved expectancy monotonically (EDGE 0.445R -> 75% 0.923R) on EVERY file.
+# EDGE was the worst option, so the default is now 0.75.
+ARM_PENETRATION = float(os.environ.get('ARM_PENETRATION', '0.75'))
 
 # ── Major 4H S/R confluence (LonesomeTheBlue SRchannel logic) ──
 # Detected from the 4H candles we ALREADY fetch (no extra API credits, no
@@ -353,6 +367,16 @@ def _candle_pattern(entry, c4, c15):
         factors.append(found['name'])
         entry['confluence'] = (entry.get('confluence') or 0) + 1
     entry['factors'] = factors
+
+
+def _session_ok(entry):
+    """Is this setup in a session we trade? Thin-liquidity hours produced
+    roughly a fifth of the expectancy of the rest, so they are flagged."""
+    try:
+        h = datetime.now(timezone.utc).hour
+        entry['sessionSkip'] = (h in SKIP_HOURS)
+    except Exception:
+        entry['sessionSkip'] = False
 
 
 def _attach_respect(entry, c4, c15):
@@ -882,6 +906,7 @@ def scan_once():
         _sr_confluence(entry)
         _candle_pattern(entry, c4, c15)
         _attach_respect(entry, c4, c15)
+        _session_ok(entry)
         if struct_aligned:
             # full confluence signal — price in OB AND 15m confirmed
             new_signals.append(entry)
@@ -1124,6 +1149,7 @@ def reanalyze_from_cache():
         _sr_confluence(entry)
         _candle_pattern(entry, c4, c15)
         _attach_respect(entry, c4, c15)
+        _session_ok(entry)
         if struct_aligned:
             new_signals.append(entry)
         else:
@@ -1430,6 +1456,7 @@ def get_matrix():
             'patternStrength': (e or {}).get('patternStrength'),
             'respectScore': (e or {}).get('respectScore'),
             'respects': (e or {}).get('respects'),
+            'sessionSkip': (e or {}).get('sessionSkip', False),
             'tf': pair_tf_used.get(clean, {'htf': HTF_TF, 'ltf': LTF_TF}),
             'obGrade': (e or {}).get('obGrade'),
             'obScore': (e or {}).get('obScore'),
@@ -1501,6 +1528,9 @@ def status():
         'credits_remaining': max(0, DAILY_CREDIT_LIMIT - used),
         'htf': HTF_TF,
         'ltf': LTF_TF,
+        'skip_hours': sorted(SKIP_HOURS),
+        'arm_penetration': engine.arm_penetration,
+        'first_tap_only': engine.first_tap_only,
         'pair_tf_overrides': {k: {'htf': v[0], 'ltf': v[1]} for k, v in PAIR_TF.items()},
         'candle_tz': CANDLE_TZ,
         'tracker': tracker_stats,
