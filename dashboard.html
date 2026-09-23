@@ -582,7 +582,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "3.4";
+const DASH_VERSION = "3.6";
 const DASH_DATE    = "2026-07-30";
 
 // ---- interactive state ----
@@ -1087,9 +1087,14 @@ function mxRow(r){
   var ob;
   if(r.ob==='signal')     ob = mxCell(r.bias==='bull'?'c-long':'c-short', r.bias==='bull'?'LONG':'SHORT',
                                       'Signal — price in the 4H OB and 15m confirmed');
-  else if(r.ob==='armed') ob = mxCell('c-armed','ARMED','Price is inside the 4H OB, waiting on 15m');
-  else if(r.ob==='near')  ob = mxCell('c-near', (r.nearPips!=null? Number(r.nearPips).toFixed(0)+'p':'near'),
-                                      'Approaching a 4H OB');
+  else if(r.ob==='armed') ob = mxCell('c-armed',
+        (r.bias==='bull'?'▲ ARM':(r.bias==='bear'?'▼ ARM':'ARMED')),
+        'Armed '+(r.bias==='bull'?'LONG (demand OB)':r.bias==='bear'?'SHORT (supply OB)':'')+
+        ' — price is inside the 4H OB, waiting on 15m');
+  else if(r.ob==='near')  ob = mxCell('c-near',
+        (r.bias==='bull'?'▲ ':(r.bias==='bear'?'▼ ':''))+
+        (r.nearPips!=null? Number(r.nearPips).toFixed(0)+'p':'near'),
+        'Approaching a 4H '+(r.bias==='bull'?'demand (BUY)':r.bias==='bear'?'supply (SELL)':'')+' zone');
   else                    ob = mxCell('c-none','–');
   ob += counter;
 
@@ -1132,14 +1137,15 @@ function mxRow(r){
           ' — printed at the zone">'+r.pattern.replace('Bullish ','').replace('Bearish ','')+
           '</span>';
   } else pat = mxCell('c-none','–');
-  return '<tr class="'+(r.prime?'mx-prime':'')+'">'+
+  var skip = r.sessionSkip ? ' style="opacity:0.45" title="Thin session — historically much weaker; consider skipping"' : '';
+  return '<tr class="'+(r.prime?'mx-prime':'')+'"'+skip+'>'+
     '<td class="mx-pair"><a href="'+tvLink(r.pair)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+r.pair+'</a>'+
       (r.tf && r.tf.htf && String(r.tf.htf).toLowerCase()!=='4h'
         ? '<div class="mx-sub" style="color:var(--accent)">'+String(r.tf.htf).toUpperCase()+'/'+String(r.tf.ltf).replace('min','m').toUpperCase()+'</div>'
         : '')+
     '</td>'+
     '<td>'+trend+'</td>'+
-    '<td>'+ob+'</td><td>'+resp+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
+    '<td>'+ob+'</td><td>'+grd+'</td><td>'+resp+'</td><td>'+ltf+'</td><td>'+pat+'</td>'+
     '<td>'+srCell(r.daily, r.dailyLo, r.dailyHi)+'</td>'+
     '<td>'+srCell(r.weekly, r.weeklyLo, r.weeklyHi)+'</td>'+
     '<td>'+conf+'</td><td>'+star+'</td>'+
