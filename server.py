@@ -32,6 +32,9 @@ except Exception:
 
 
 app = Flask(__name__)
+from ict_session import ict_bp, start_ict_scheduler
+   app.register_blueprint(ict_bp)
+   start_ict_scheduler(app)
 CORS(app)
 
 # ── Config from environment ──
