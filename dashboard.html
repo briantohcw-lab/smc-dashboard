@@ -1087,10 +1087,24 @@ function mxRow(r){
   var ob;
   if(r.ob==='signal')     ob = mxCell(r.bias==='bull'?'c-long':'c-short', r.bias==='bull'?'LONG':'SHORT',
                                       'Signal — price in the 4H OB and 15m confirmed');
+  else if(r.ob==='armed' && r.tappedOnly) {
+    // Price tapped the 4H OB and has already left it. The setup is still live
+    // — the 15m break + retest can happen after price exits the zone — but
+    // the row must say so, because "price is in the zone" is not true now.
+    var ageTxt = (r.tappedHours!=null)
+        ? (r.tappedHours<1 ? Math.round(r.tappedHours*60)+'m' : r.tappedHours+'h')
+        : '';
+    ob = mxCell('c-tapped',
+        (r.bias==='bull'?'▲ TAP':(r.bias==='bear'?'▼ TAP':'TAPPED'))+(ageTxt?' '+ageTxt:''),
+        'Price TAPPED the 4H '+(r.bias==='bull'?'demand (BUY)':r.bias==='bear'?'supply (SELL)':'')+
+        ' zone'+(ageTxt?' '+ageTxt+' ago':'')+' and has since left it. '+
+        'Go to the 15m and look for the break of structure, then the retest — '+
+        'that retest is your entry. Still a valid setup.');
+  }
   else if(r.ob==='armed') ob = mxCell('c-armed',
         (r.bias==='bull'?'▲ ARM':(r.bias==='bear'?'▼ ARM':'ARMED')),
         'Armed '+(r.bias==='bull'?'LONG (demand OB)':r.bias==='bear'?'SHORT (supply OB)':'')+
-        ' — price is inside the 4H OB, waiting on 15m');
+        ' — price is inside the 4H OB right now, waiting on 15m');
   else if(r.ob==='near')  ob = mxCell('c-near',
         (r.bias==='bull'?'▲ ':(r.bias==='bear'?'▼ ':''))+
         (r.nearPips!=null? Number(r.nearPips).toFixed(0)+'p':'near'),
@@ -1892,7 +1906,5 @@ refreshAll();
 setInterval(refreshAll, 15000);
 setInterval(updateClock, 1000);
 </script>
-  <script src="/ict/static/ict_embed.js" defer>
-  </script>
 </body>
 </html>
