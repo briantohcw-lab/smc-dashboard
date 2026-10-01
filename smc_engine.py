@@ -22,9 +22,9 @@ from typing import Optional
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. Surfaced through
 # server.py /status and the dashboard footer so a deploy can be verified.
-ENGINE_VERSION = "3.2"
-ENGINE_DATE    = "2026-07-30"
-ENGINE_NOTES   = "OB strength grading A/B/C, respect scoring, candle patterns"
+ENGINE_VERSION = "3.3"
+ENGINE_DATE    = "2026-10-01"
+ENGINE_NOTES   = "recent-tap penetration parity, 24h tap window"
 
 BULLISH = 1
 BEARISH = -1
@@ -1279,17 +1279,36 @@ class SMCEngine:
         between two 2-hour engine scans, the "is price in OB right now?" check
         misses it. This looks back over recent 15m candles to catch the tap.
 
+        The tap must satisfy the SAME penetration requirement as a live arm
+        (self.arm_penetration). Without this, a recent-tap arm could fire on a
+        wick that merely grazed the zone edge while a live arm at the identical
+        price would be rejected - the inconsistency that made some armed pairs
+        look like they were nowhere near the zone on the chart.
+
         Returns (mitigated, bars_since, mitigation_time).
-        bars_since = how many 15m bars ago the FIRST tap in the window occurred.
+        bars_since = how many 15m bars ago the FIRST qualifying tap occurred.
         """
         n = len(candles_15m)
         if n == 0:
             return False, None, None
+        depth = ob.high - ob.low
+        if depth <= 0:
+            return False, None, None
+        pad = depth * self.arm_penetration
+        # Mirror price_in_ob: demand is entered from above, supply from below.
+        if ob.bias == BULLISH:
+            trigger = ob.high - pad      # price must trade at/below this
+            def qualifies(c):
+                return c.low <= trigger and c.low >= ob.low - depth
+        else:
+            trigger = ob.low + pad       # price must trade at/above this
+            def qualifies(c):
+                return c.high >= trigger and c.high <= ob.high + depth
+
         start = max(0, n - window_bars)
         first_tap_idx = None
         for i in range(start, n):
-            c = candles_15m[i]
-            if c.high >= ob.low and c.low <= ob.high:
+            if qualifies(candles_15m[i]):
                 first_tap_idx = i
                 break
         if first_tap_idx is None:
@@ -1718,4 +1737,3 @@ class SMCEngine:
         if 'XAU' in p:  return 0.10
         if 'XAG' in p:  return 0.001
         return 0.0001
-      
