@@ -32,18 +32,15 @@ except Exception:
 
 
 app = Flask(__name__)
-from ict_session import ict_bp, start_ict_scheduler
-app.register_blueprint(ict_bp)
-start_ict_scheduler(app)
 CORS(app)
 
 # ── Config from environment ──
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "3.6"
+SERVER_VERSION = "3.7"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "matrix column fix, armed direction, backtested defaults"
+SERVER_NOTES   = "recently-tapped state, 24h tap window"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -119,9 +116,13 @@ FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '0').strip() not in ('0', 'fal
 
 # mitigation_window: how many 15m bars an armed setup stays active after price
 # taps the 4H OB (waiting for 15m confirmation), even if price wicked out.
-# 40 bars = ~10 hours. Raised from 20 because the engine only scans every 2h,
-# so a short window gave only 2-3 scans to catch a confirmation. Env: MIT_WINDOW.
-MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '40'))
+# 96 bars = ~24 hours. Raised from 40 (10h) because at a 2-hour scan interval
+# the instant "is price in the zone now?" check found only 70 of 215 available
+# trades (28.3R vs 177.3R) on 11 months of broker data; looking back over the
+# slept-through bars recovered 227 trades / 68.9R for zero extra API credits.
+# A tap 8 hours ago is still a live setup if the 15m has not broken and
+# retested yet. Env: MIT_WINDOW.
+MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '96'))
 
 # How deep into a 4H OB price must be before arming (fraction of zone depth).
 # Because the free data feed differs from your broker/TradingView feed, arming
@@ -1398,6 +1399,15 @@ def get_matrix():
         else:
             ob_state = 'none'
 
+        # ── was this armed by a LIVE presence in the zone, or by a tap that
+        # has already left? A tapped-and-left zone is still a valid setup
+        # (watch the 15m for break + retest), but the user needs to know price
+        # is no longer sitting in it, and how stale the tap is.
+        tapped_only = bool(e.get('mitigated')) if e else False
+        bars_since_mit = e.get('barsSinceMit') if e else None
+        tapped_hours = (round(bars_since_mit * 0.25, 1)
+                        if (tapped_only and bars_since_mit is not None) else None)
+
         bias = (e or wat.get(clean, {})).get('bias')
         conf = e.get('confluence') if e else None
         prime = bool(e.get('srPrime')) if e else False
@@ -1448,6 +1458,7 @@ def get_matrix():
             'trendH4': h4, 'trendD1': d1,
             'tfAlign': tf_align, 'withTrend': with_trend,
             'ob': ob_state, 'bias': bias, 'nearPips': near_pips,
+            'tappedOnly': tapped_only, 'tappedHours': tapped_hours,
             'obLow': e.get('obLow') if e else None,
             'obHigh': e.get('obHigh') if e else None,
             'ltf': ltf, 'ltfState': ltf_state,
