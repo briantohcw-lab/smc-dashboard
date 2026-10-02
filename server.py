@@ -16,7 +16,7 @@ Set these as Railway environment variables:
 from flask import Flask, jsonify, Response, request
 from flask_cors import CORS
 from datetime import datetime, timezone
-import os, time, threading, urllib.request, urllib.parse, urllib.error, json
+import os, re, time, threading, urllib.request, urllib.parse, urllib.error, json
 
 from smc_engine import SMCEngine, Candle, BULLISH, BEARISH
 try:
@@ -40,7 +40,7 @@ CORS(app)
 # every component together so you can confirm exactly what is deployed.
 SERVER_VERSION = "3.7"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "recently-tapped state, 24h tap window"
+SERVER_NOTES   = "recently-tapped state, 24h tap window, dashboard cache fix"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -1291,21 +1291,77 @@ def scan_loop():
 
 
 # ── Routes ──
-_dashboard_cache = {'html': None}
+# The dashboard HTML is pulled from your raw GitHub link (DASHBOARD_URL) rather
+# than bundled, so the UI can be updated without redeploying the server.
+#
+# It used to be cached forever: fetched once on the first page load after boot
+# and served from memory until the process restarted. Pushing a new
+# dashboard.html to GitHub therefore had NO effect on the live site - you kept
+# seeing the old version, and the version badge stayed mismatched, which looked
+# like there were two different dashboards. Now the cache expires, and you can
+# force a refresh with /?refresh=1 (or /reload-dashboard) without a redeploy.
+DASHBOARD_TTL = int(os.environ.get('DASHBOARD_TTL', '300'))   # seconds
+_dashboard_cache = {'html': None, 'at': 0.0, 'url': None}
+
+
+def _fetch_dashboard(url):
+    with urllib.request.urlopen(url, timeout=15) as r:
+        return r.read().decode()
+
 
 @app.route('/')
 def dashboard():
-    if _dashboard_cache['html'] is None:
-        url = os.environ.get('DASHBOARD_URL', '')
-        if url:
-            try:
-                with urllib.request.urlopen(url, timeout=15) as r:
-                    _dashboard_cache['html'] = r.read().decode()
-            except Exception as e:
-                return Response(f"Could not load dashboard from DASHBOARD_URL: {e}", mimetype='text/plain')
-        else:
-            return Response("Set DASHBOARD_URL env var to your raw GitHub dashboard.html link", mimetype='text/plain')
-    return Response(_dashboard_cache['html'], mimetype='text/html')
+    url = os.environ.get('DASHBOARD_URL', '')
+    if not url:
+        return Response("Set DASHBOARD_URL env var to your raw GitHub dashboard.html link",
+                        mimetype='text/plain')
+
+    force = request.args.get('refresh') in ('1', 'true', 'yes')
+    age = time.time() - _dashboard_cache['at']
+    stale = (_dashboard_cache['html'] is None
+             or _dashboard_cache['url'] != url
+             or age > DASHBOARD_TTL
+             or force)
+
+    if stale:
+        try:
+            # GitHub's raw CDN caches aggressively; a cache-buster query makes
+            # sure a refresh actually sees the file you just pushed.
+            fetch_url = url + ('&' if '?' in url else '?') + 'cb=' + str(int(time.time()))
+            html = _fetch_dashboard(fetch_url)
+            _dashboard_cache.update({'html': html, 'at': time.time(), 'url': url})
+        except Exception as e:
+            if _dashboard_cache['html'] is None:
+                return Response(f"Could not load dashboard from DASHBOARD_URL: {e}",
+                                mimetype='text/plain')
+            # keep serving the last good copy rather than breaking the page
+            app.logger.warning("dashboard refresh failed, serving cached copy: %s", e)
+
+    resp = Response(_dashboard_cache['html'], mimetype='text/html')
+    # stop the BROWSER caching it too - the other half of "I pushed but nothing
+    # changed" is Chrome holding its own copy.
+    resp.headers['Cache-Control'] = 'no-store, max-age=0'
+    return resp
+
+
+@app.route('/reload-dashboard')
+def reload_dashboard():
+    """Force-refetch dashboard.html from GitHub. No API credits, no redeploy."""
+    url = os.environ.get('DASHBOARD_URL', '')
+    if not url:
+        return jsonify({'ok': False, 'error': 'DASHBOARD_URL not set'}), 400
+    try:
+        fetch_url = url + ('&' if '?' in url else '?') + 'cb=' + str(int(time.time()))
+        html = _fetch_dashboard(fetch_url)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
+    _dashboard_cache.update({'html': html, 'at': time.time(), 'url': url})
+    ver = None
+    m = re.search(r'DASH_VERSION\s*=\s*"([^"]+)"', html)
+    if m:
+        ver = m.group(1)
+    return jsonify({'ok': True, 'bytes': len(html), 'dashVersion': ver,
+                    'serverVersion': SERVER_VERSION})
 
 @app.route('/signals')
 def get_signals():
