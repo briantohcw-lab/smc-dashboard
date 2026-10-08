@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "3.7"
+SERVER_VERSION = "4.0"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "recently-tapped state, 24h tap window, dashboard cache fix"
+SERVER_NOTES   = "AOI scan off by default, armed chart read, panels removed"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -124,16 +124,34 @@ FIRST_TAP_ONLY = os.environ.get('FIRST_TAP_ONLY', '0').strip() not in ('0', 'fal
 # retested yet. Env: MIT_WINDOW.
 MIT_WINDOW = int(os.environ.get('MIT_WINDOW', '96'))
 
+# ── AI on APPROACHING pairs ──
+# The AI read used to run only on armed setups + signals. Running it on pairs
+# that are merely NEAR a 4H OB gives you the read before price arrives, which
+# is when it is actually useful for planning. Each one is an Anthropic API
+# call, so it is capped two ways: the N nearest pairs, and a max distance.
+# AI_ON_WATCH=0 turns it off entirely.
+AI_ON_WATCH   = os.environ.get('AI_ON_WATCH', '1').strip() not in ('0', 'false', 'False')
+AI_WATCH_MAX  = int(os.environ.get('AI_WATCH_MAX', '5'))
+AI_WATCH_PIPS = float(os.environ.get('AI_WATCH_PIPS', '40'))
+
 # How deep into a 4H OB price must be before arming (fraction of zone depth).
 # Because the free data feed differs from your broker/TradingView feed, arming
 # on a mere edge-graze often looks like "not near the OB" on your chart.
 # Requiring real penetration keeps armed pairs genuinely near the zone on your
 # chart. 0.0 = old edge-touch behaviour; 0.25 = must be 25% into the zone.
 # Raise for stricter/fewer arms, lower to keep more. Env: ARM_PENETRATION.
-# Backtested over 11 months / 10 broker files: entering deeper into the OB
-# improved expectancy monotonically (EDGE 0.445R -> 75% 0.923R) on EVERY file.
-# EDGE was the worst option, so the default is now 0.75.
-ARM_PENETRATION = float(os.environ.get('ARM_PENETRATION', '0.75'))
+# Backtested over 11 months / 10 broker files, 5 walk-forward windows: entering
+# deeper into the OB improves expectancy monotonically, and the gain holds in
+# every window rather than coming from one lucky stretch:
+#   depth 65% -> 0.524R (positive in 5/5 windows)
+#   depth 75% -> 0.648R (5/5)
+#   depth 85% -> 0.723R (5/5)   <- default
+#   depth 90% -> 0.807R (4/5)   better pooled, but loses a window: not default
+# The mechanism: deeper penetration puts price nearer the far edge of the zone,
+# so the structural stop is TIGHTER. Stop size was the single most consistent
+# quality signal measured - the tightest third of stops beat the widest third
+# in 5 of 5 windows (0.877R vs 0.269R pooled). Depth is how you buy that.
+ARM_PENETRATION = float(os.environ.get('ARM_PENETRATION', '0.85'))
 
 # ── Major 4H S/R confluence (LonesomeTheBlue SRchannel logic) ──
 # Detected from the 4H candles we ALREADY fetch (no extra API credits, no
@@ -173,7 +191,11 @@ AOI_WEEKLY_LIFE  = int(os.environ.get('AOI_WEEKLY_LIFE', '260'))   # weekly life
 AOI_MIN_TOUCHES  = int(os.environ.get('AOI_MIN_TOUCHES', '3'))
 AOI_MIN_PIPS     = float(os.environ.get('AOI_MIN_PIPS', '5'))
 AOI_MAX_PIPS     = float(os.environ.get('AOI_MAX_PIPS', '60'))
-AOI_ENABLED      = os.environ.get('AOI_ENABLED', '1').strip() not in ('0', 'false', 'False')
+# OFF by default from v4.0. The AOI panel was removed from the dashboard, and
+# the background scan it fed costs 2 credits per pair per refresh - 56 a day
+# on 28 pairs, about 7% of the free tier's 800. That is one extra full OB
+# scan per day reclaimed. Set AOI_ENABLED=1 to bring the scan back.
+AOI_ENABLED      = os.environ.get('AOI_ENABLED', '0').strip() not in ('0', 'false', 'False')
 
 # ── Daily S/R channels (broader than AOI) — computed from the SAME daily
 # candles the AOI pass already fetches, so no extra credits. Uses the engine's
@@ -381,6 +403,62 @@ def _session_ok(entry):
         entry['sessionSkip'] = (h in SKIP_HOURS)
     except Exception:
         entry['sessionSkip'] = False
+
+
+def _watch_as_entry(w, c4, c15):
+    """
+    Turn a WATCHLIST row (price approaching a 4H OB) into the same shape an
+    ARMED entry has, so the AI analyser and every enrichment helper can take it
+    unchanged. Watchlist rows carry only pair/price/bias/OB geometry/distance;
+    everything else is defaulted, then filled by the normal enrichment chain.
+
+    Marked stage='approaching' so the AI knows price has NOT arrived yet and
+    should not be described as if the setup were live.
+    """
+    e = {
+        'pair': w.get('pair'), 'price': w.get('price'), 'bias': w.get('bias'),
+        'obType': w.get('obType'), 'obHigh': w.get('obHigh'), 'obLow': w.get('obLow'),
+        'distancePips': w.get('distancePips'),
+        'stage': 'approaching',
+        'timeframe': '4H',
+        # not yet knowable for a zone price has not reached
+        'm15struct': None, 'aligned': False, 'brState': None,
+        'mitigated': False, 'currentlyIn': False, 'barsSinceMit': None,
+        'fvg': False, 'eqhl': False, 'sweep': False, 'nearSr': False,
+        'confluence': 0, 'factors': [],
+        # present-but-empty so anything reading these by bracket access on an
+        # armed entry does not blow up on an approaching one
+        'fvgLo': None, 'fvgHi': None,
+        'srLevel': None, 'srHi': None, 'srLo': None,
+        'sweepLevel': None, 'eqhlLevel': None, 'eqhlKind': None,
+        'dblA': None, 'dblB': None, 'dblRef': None, 'dblKind': None,
+        'ltfObHigh': None, 'ltfObLow': None,
+        'receivedAt': datetime.now(timezone.utc).isoformat(),
+        'slPrice': None, 'tpPrice': None, 'slPips': None, 'tpPips': None, 'rr': None,
+        'session': None,
+        'alert': ('Bullish' if w.get('bias') == 'bull' else 'Bearish')
+                 + str(w.get('obType') or '') + 'OB (approaching)',
+    }
+    tr = _trend_for(w.get('pair') or '')
+    e['htfTrend'] = tr.get('h4')
+    for fn in (_attach_daily_sr, _sr_confluence):
+        try:
+            fn(e)
+        except Exception:
+            pass
+    try:
+        _candle_pattern(e, c4, c15)
+    except Exception:
+        pass
+    try:
+        _attach_respect(e, c4, c15)
+    except Exception:
+        pass
+    try:
+        _session_ok(e)
+    except Exception:
+        pass
+    return e
 
 
 def _attach_respect(entry, c4, c15):
@@ -941,6 +1019,23 @@ def scan_once():
     # Purpose: describe structure quality + risks to help SKIP weak setups.
     # It does NOT predict, recommend, or score probability of success.
     if ai_analysis is not None and getattr(ai_analysis, 'AI_ENABLED', False):
+        # APPROACHING pairs get analysed too, so you get a read BEFORE price
+        # reaches the zone rather than after. Watchlist entries carry far fewer
+        # fields than armed ones, so they are normalised to the same shape and
+        # run through the same enrichment chain first - otherwise the AI would
+        # be reasoning about a setup with no S/R, pattern or respect context.
+        ai_watch = []
+        if AI_ON_WATCH:
+            for w in watch_top[:AI_WATCH_MAX]:
+                if w.get('distancePips') is None or w['distancePips'] > AI_WATCH_PIPS:
+                    continue
+                cc = candle_cache.get(w.get('pair'))
+                if not cc:
+                    continue
+                c4c, c15c = cc
+                we = _watch_as_entry(w, c4c, c15c)
+                ai_watch.append((w, we))
+
         for entry in (new_signals + new_armed):
             cc = candle_cache.get(entry.get('pair'))
             if not cc:
@@ -956,6 +1051,23 @@ def scan_once():
                     }
             except Exception:
                 pass   # never let AI break the scan
+
+        for w, we in ai_watch:
+            cc = candle_cache.get(w.get('pair'))
+            if not cc:
+                continue
+            c4c, c15c = cc
+            try:
+                result = ai_analysis.analyze_setup(we, c4c, c15c)
+                if result.get('ok'):
+                    w['ai'] = {
+                        'label': result.get('label', ''),
+                        'note':  result.get('note', ''),
+                        'flags': result.get('flags', []),
+                        'stage': 'approaching',
+                    }
+            except Exception:
+                pass
 
     with _lock:
         signals.clear()
@@ -1160,6 +1272,9 @@ def reanalyze_from_cache():
             entry['m15needed'] = 'bearish CHoCH' if not ob_bull else 'bullish CHoCH'
             new_armed.append(entry)
 
+    watch.sort(key=lambda w: w['distancePips'])
+    watch_top = watch[:12]
+
     # re-attach any AI read already computed for these setups this scan, WITHOUT
     # making new API calls (reclassify/filter toggles must stay free).
     if ai_analysis is not None and getattr(ai_analysis, 'AI_ENABLED', False):
@@ -1174,9 +1289,22 @@ def reanalyze_from_cache():
                     }
             except Exception:
                 pass
-
-    watch.sort(key=lambda w: w['distancePips'])
-    watch_top = watch[:12]
+        # approaching pairs: reuse the read from the last real scan, free
+        for w in watch_top:
+            cc = _last_scan_candles.get(w.get('pair'))
+            if not cc:
+                continue
+            try:
+                cached = ai_analysis.get_cached(_watch_as_entry(w, cc[0], cc[1]))
+                if cached.get('ok'):
+                    w['ai'] = {
+                        'label': cached.get('label', ''),
+                        'note':  cached.get('note', ''),
+                        'flags': cached.get('flags', []),
+                        'stage': 'approaching',
+                    }
+            except Exception:
+                pass
 
     with _lock:
         signals.clear();   signals.extend(new_signals)
