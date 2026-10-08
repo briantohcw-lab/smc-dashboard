@@ -89,6 +89,13 @@
   .empty{border:1px dashed var(--border2);border-radius:8px;padding:34px 16px;text-align:center;color:var(--text3);font-size:11px;letter-spacing:0.1em}
   .empty .sub{font-size:9px;margin-top:6px;color:var(--dim);animation:pulse 2s infinite}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+  .chart-read{margin-top:12px;padding:12px 13px;border-radius:6px;
+    background:rgba(240,180,41,0.05);border:1px solid rgba(240,180,41,0.22)}
+  .chart-read .cr-head{font-size:9px;letter-spacing:0.14em;color:var(--warn);margin-bottom:8px}
+  .chart-read p{font-size:11.5px;line-height:1.6;color:var(--text);margin:0 0 7px 0}
+  .chart-read p:last-child{margin-bottom:0}
+  .chart-read b{color:#fff}
+  .chart-read i{color:var(--warn);font-style:normal}
   .ai-block{margin-top:12px;padding:10px;border-radius:6px;background:rgba(88,166,255,0.06);border:1px solid rgba(88,166,255,0.2)}
   .ai-head{display:flex;align-items:center;gap:8px;font-size:9px;letter-spacing:0.1em;color:var(--accent);margin-bottom:6px}
   .ai-label{margin-left:auto;font-size:9px;letter-spacing:0.04em;padding:2px 7px;border-radius:4px;background:rgba(240,180,41,0.12);border:1px solid var(--warn);color:var(--warn)}
@@ -215,6 +222,7 @@
   .c-long {background:rgba(63,214,139,0.16);color:var(--bull);border:1px solid rgba(63,214,139,0.5)}
   .c-short{background:rgba(255,93,108,0.16);color:var(--bear);border:1px solid rgba(255,93,108,0.5)}
   .c-armed{background:rgba(240,180,41,0.14);color:var(--warn);border:1px solid rgba(240,180,41,0.45)}
+  .c-tapped{background:rgba(120,170,255,0.14);color:#8fb6ff;border:1px solid rgba(120,170,255,0.45)}
   .c-near {color:var(--text3);border:1px solid var(--border2)}
   .c-in   {background:rgba(240,180,41,0.16);color:var(--warn);border:1px solid rgba(240,180,41,0.5)}
   .c-close{color:var(--accent);border:1px solid rgba(88,166,255,0.4)}
@@ -477,7 +485,7 @@
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <span class="mx-only" id="mxOnlyActive">SHOW ONLY ACTIVE</span>
       <span class="mx-legend" style="padding:0">
-        <span>4H OB: <b style="color:var(--bull)">LONG</b>/<b style="color:var(--bear)">SHORT</b> = signal · <b style="color:var(--warn)">ARMED</b> = in zone · near = approaching</span>
+        <span>4H OB: <b style="color:var(--bull)">LONG</b>/<b style="color:var(--bear)">SHORT</b> = signal · <b style="color:var(--warn)">ARM</b> = in zone now · <b style="color:#8fb6ff">TAP</b> = tapped &amp; left, check 15m · near = approaching</span>
         <span><b style="color:var(--warn)">★</b> = PRIME (OB + price on a daily/weekly level)</span>
         <span>TREND: 4H over Daily · <b style="color:var(--bear)">!</b> = setup is against the 4H trend</span>
       </span>
@@ -521,58 +529,6 @@
   </section>
 
   <section>
-    <div class="sec-head" style="color:var(--warn)"><span class="bar" style="background:var(--warn)"></span>▚ AREA OF INTEREST — WEEKLY &amp; DAILY S/R<span class="sec-count" id="c-aoi">0</span></div>
-    <div class="aoi-controls">
-      <span class="ctrl-lbl" style="color:var(--text3)">TIMEFRAME</span>
-      <div class="aoi-tf">
-        <button class="ctrl-btn active" data-aoitf="daily">DAILY</button>
-        <button class="ctrl-btn" data-aoitf="weekly">WEEKLY</button>
-      </div>
-      <span class="aoi-refresh" id="aoiRefresh" title="Recompute zones now — costs credits">↻ REFRESH ZONES</span>
-      <div class="aoi-note" id="aoiNote">Zones = horizontal S/R touched 3+ times, 5–60 pips thick, within lifespan. Refreshes daily; switching timeframe is free.</div>
-    </div>
-    <div id="aoiList"></div>
-  </section>
-
-  <section>
-    <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▤ DAILY S/R LEVELS<span class="sec-count" id="c-dsr">0</span></div>
-    <div class="aoi-note" id="dsrNote" style="padding:0 4px 8px 4px">Nearest daily wall each way, one row per pair.</div>
-    <div id="dailySrList"></div>
-  </section>
-
-  <section>
-    <div class="sec-head" style="color:var(--bull)"><span class="bar" style="background:var(--bull)"></span>✎ TRADE JOURNAL — WHAT ACTUALLY WORKS<span class="sec-count" id="c-jr">0</span></div>
-    <div class="aoi-note" style="padding:0 4px 8px 4px">Log your REAL fills (not the auto-tracker). Stats below show which conditions actually made money. Suggested SL pips = what the signal card recommended, so you can see if tightening stops hurts you.</div>
-    <div class="drop-zone" id="jrDrop">
-      <div class="big">⇪ DROP / PASTE MT5 SCREENSHOT</div>
-      tap to choose an image · or paste with Ctrl+V
-      <div class="sub">Claude reads the trade details, then you confirm before it's saved. Pending orders are ignored.</div>
-      <input type="file" id="jrFile" accept="image/*" style="display:none">
-    </div>
-    <div id="jrStage"></div>
-    <div class="jr-form">
-      <input id="jrPair" placeholder="PAIR" style="width:80px">
-      <select id="jrDir"><option value="long">LONG</option><option value="short">SHORT</option></select>
-      <input id="jrEntry" placeholder="entry">
-      <input id="jrSl" placeholder="stop loss">
-      <input id="jrTp" placeholder="take profit">
-      <input id="jrExit" placeholder="exit price">
-      <select id="jrSession"><option value="">session…</option><option>Asian</option><option>London</option><option>NY</option></select>
-      <input id="jrConf" placeholder="conf /10" style="width:70px">
-      <input id="jrSug" placeholder="sug SL pips" style="width:96px">
-      <input id="jrMfe" placeholder="max fav pips" style="width:100px" title="How far the trade ran in your favour before reversing — the key diagnostic">
-      <input id="jrFactors" class="wide" placeholder="factors (comma)">
-      <input id="jrOpened" class="wide" placeholder="opened YYYY-MM-DD HH:MM">
-      <input id="jrClosed" class="wide" placeholder="closed YYYY-MM-DD HH:MM">
-      <input id="jrNotes" class="wide" placeholder="notes">
-      <button class="jr-btn" id="jrAdd">+ LOG TRADE</button>
-      <button class="jr-btn ghost" id="jrExport">⭳ EXPORT BACKUP</button>
-    </div>
-    <div id="jrStats"></div>
-    <div id="jrList"></div>
-  </section>
-
-  <section>
     <div class="sec-head"><span class="bar" style="background:var(--text3)"></span>⊛ HISTORY — 2+ CONFLUENCE (LAST 10)<span class="sec-count" id="c-hist">0</span></div>
     <div id="histList"></div>
   </section>
@@ -582,8 +538,8 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "3.6";
-const DASH_DATE    = "2026-07-30";
+const DASH_VERSION = "4.0";
+const DASH_DATE    = "2026-10-01";
 
 // ---- interactive state ----
 const filters = { dir: 'all', conf: 0 };
@@ -632,6 +588,113 @@ function applyFilters(list){
 }
 
 // ---- expandable detail panel (built from any entry) ----
+// ── CHART READ ──────────────────────────────────────────────────────────
+// A written analysis of an ARMED pair, assembled from the numbers already in
+// the payload. Deliberately NOT an AI call: every sentence is derived from a
+// measured field, so it cannot invent a level or a structure that is not there,
+// it costs nothing, and it renders even when the AI key is absent.
+function chartRead(x){
+  const bull = x.bias === 'bull';
+  const dir  = bull ? 'LONG' : 'SHORT';
+  const zone = (x.obLow!=null && x.obHigh!=null)
+      ? fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh) : null;
+  if(!zone) return '';
+  const P = [];
+
+  // 1. the zone, and how price got there
+  let where;
+  if(x.currentlyIn)
+    where = 'Price is inside it now, at '+fmt(x.pair,x.price)+'.';
+  else if(x.barsSinceMit!=null){
+    const h = (x.barsSinceMit*0.25);
+    where = 'Price tapped it '+(h<1? Math.round(h*60)+' minutes':h.toFixed(1)+' hours')+
+            ' ago and has since left the zone — it now trades at '+fmt(x.pair,x.price)+'.';
+  } else
+    where = 'Price is at the zone, trading at '+fmt(x.pair,x.price)+'.';
+  P.push('<b>The 4H zone.</b> '+(bull?'Demand':'Supply')+' block at <b>'+zone+'</b>, '+
+         (x.obType||'Swing').toLowerCase()+' structure. '+where+
+         ' This is a '+dir+' setup: you are looking for '+
+         (bull?'buyers to defend the zone':'sellers to defend the zone')+'.');
+
+  // 2. how this zone has behaved before
+  if(x.respectScore!=null || x.respects!=null){
+    const r = x.respects, sc = x.respectScore;
+    let verdict;
+    if(sc>=3)      verdict = 'it has held cleanly most times it was tested — the strongest evidence available here';
+    else if(sc>=2) verdict = 'it has held more often than it has failed';
+    else if(sc>=1) verdict = 'its record is mixed; treat it as untested rather than proven';
+    else           verdict = 'price has cut through it before, so do not lean on the zone alone';
+    P.push('<b>History.</b> '+(r!=null? r+' clean reaction'+(r===1?'':'s')+' recorded, and ':'')+
+           verdict+'.');
+  }
+
+  // 3. the 15m - the part that decides the entry
+  let ltf;
+  if(x.brState==='retest')
+    ltf = 'The 15m has <b>broken structure and retested</b> the resulting 15m OB'+
+          ((x.ltfObLow!=null)? ' at '+fmt(x.pair,x.ltfObLow)+' – '+fmt(x.pair,x.ltfObHigh):'')+
+          '. This is the trigger you wait for — it has happened.';
+  else if(x.brState==='broken')
+    ltf = 'The 15m has <b>broken structure</b> in your direction'+
+          ((x.ltfObLow!=null)? ' and left an OB at '+fmt(x.pair,x.ltfObLow)+' – '+fmt(x.pair,x.ltfObHigh):'')+
+          ', but price has <b>not retested it yet</b>. This is the one to watch: the retest is your entry.';
+  else if(x.aligned || x.m15struct)
+    ltf = 'The 15m structure reads '+x.m15struct+', already agreeing with the zone.';
+  else
+    ltf = 'The 15m has <b>not broken structure yet</b>'+
+          (x.m15needed? ' — you need a '+x.m15needed:'')+
+          '. Until it does there is nothing to enter; price being in the zone is only half the setup.';
+  P.push('<b>The 15m.</b> '+ltf);
+
+  // 4. context that argues for or against
+  const pros = [], cons = [];
+  if(x.htfTrend && x.bias===x.htfTrend) pros.push('the setup runs with the 4H trend');
+  else if(x.htfTrend)                   cons.push('this is <b>against</b> the 4H trend, which historically is the weaker side');
+  if(x.srPrime)                         pros.push('the zone sits on a daily/weekly level (PRIME)');
+  if(x.nearSr)                          pros.push('a 4H S/R channel reinforces it');
+  if(x.fvg)                             pros.push('an imbalance sits inside the zone');
+  if(x.sweep)                           pros.push('liquidity was swept into it');
+  if(x.pattern)                         pros.push('a '+x.pattern+' printed in the zone');
+  if(x.sessionSkip)                     cons.push('it is forming in a thin-liquidity session, which measured roughly a fifth of the expectancy of the rest');
+  if(x.confluence!=null && x.confluence<2) cons.push('confluence is only '+x.confluence+'/10 — little is supporting it beyond the zone itself');
+  if(pros.length) P.push('<b>For it.</b> '+pros.join('; ')+'.');
+  if(cons.length) P.push('<b>Against it.</b> '+cons.join('; ')+'.');
+
+  // 5. the numbers that decide whether it is worth taking
+  if(x.slPrice!=null && x.slPips!=null){
+    let stopNote = '';
+    const sp = Number(x.slPips);
+    // Judge the stop against the ZONE's own depth, which is the only
+    // pair-independent yardstick available here. A stop much wider than the
+    // block means price is shallow in it and the structural stop is far away -
+    // exactly the profile that measured worst (widest third of stops, 0.269R,
+    // versus 0.877R for the tightest third).
+    if(x.obHigh!=null && x.obLow!=null){
+      const ratio = Math.abs(x.slPrice - x.price) / Math.max(1e-9, Math.abs(x.obHigh-x.obLow));
+      if(ratio > 1.6)
+        stopNote = ' That stop is wide relative to the block itself, which is the profile that '+
+                   'measured worst — the widest third of stops returned 0.269R against 0.877R '+
+                   'for the tightest third. Consider waiting for price deeper into the zone.';
+      else if(ratio < 0.9)
+        stopNote = ' That is a tight stop for this zone — the profile that measured best.';
+    }
+    P.push('<b>The trade.</b> Invalidation at <b>'+fmt(x.pair,x.slPrice)+'</b> ('+sp.toFixed(0)+
+           ' pips) — beyond that the zone has failed and the idea is wrong'+
+           (x.tpPrice!=null? ', target '+fmt(x.pair,x.tpPrice)+
+            (x.rr!=null?' ('+Number(x.rr).toFixed(1)+'R)':'') : '')+'.'+stopNote);
+  }
+
+  // 6. the AI's independent read, when present, kept clearly separate
+  if(x.ai && x.ai.note){
+    P.push('<b>AI risk read.</b> '+(x.ai.label?'<i>'+x.ai.label+'</i> — ':'')+x.ai.note);
+  }
+
+  return '<div class="chart-read">'+
+    '<div class="cr-head">CHART READ — '+safe(x.pair,'')+' '+dir+'</div>'+
+    P.map(function(t){return '<p>'+t+'</p>';}).join('')+
+  '</div>';
+}
+
 function detailPanel(x){
   const rows = [];
   function add(l,v){ if(v!==undefined && v!==null && v!=='') rows.push('<div class="det-item"><div class="l">'+l+'</div><div class="v">'+v+'</div></div>'); }
@@ -659,6 +722,7 @@ function detailPanel(x){
     primeLine(x)+
     trailPlan(x)+
     factorBreakdown(x)+
+    chartRead(x)+
     ai+
     '<div style="margin-top:8px">'+tvButton(x.pair)+'</div>'+
   '</div>';
@@ -770,7 +834,20 @@ function watchRow(x){
   const dirColor = isBull?'var(--bull)':'var(--bear)';
   const zone = fmt(x.pair,x.obLow)+'–'+fmt(x.pair,x.obHigh);
   const dist = (x.distancePips!=null)? Number(x.distancePips).toFixed(1)+' pips' : '—';
-  return '<div class="watch-row clickable" onclick="toggleDetail(this)">'+
+  // AI pre-read on an approaching zone: you get the quality assessment BEFORE
+  // price arrives, which is when there is still time to plan or skip it.
+  let aiTag='';
+  if(x.ai && (x.ai.label||x.ai.note)){
+    aiTag = '<div style="flex-basis:100%;margin-top:6px">'+
+      (x.ai.label?'<span class="mini ai-row-label">◆ '+x.ai.label+'</span>':'')+
+      (x.ai.note?'<span class="mini ai-row-note"> — '+x.ai.note+'</span>':'')+
+      ((x.ai.flags&&x.ai.flags.length)
+        ? '<div class="ai-flags" style="margin-top:5px">'+
+          x.ai.flags.map(function(f){return '<span class="ai-flag">'+f+'</span>';}).join('')+
+          '</div>' : '')+
+    '</div>';
+  }
+  return '<div class="watch-row clickable" style="flex-wrap:wrap" onclick="toggleDetail(this)">'+
     '<span class="pair-cell">'+safe(x.pair,'—')+'</span>'+
     '<span class="mini" style="color:'+dirColor+'">'+arrow+'</span>'+
     '<span class="mini" style="color:var(--text2)">'+safe(x.obType,'Swing')+'</span>'+
@@ -778,6 +855,7 @@ function watchRow(x){
     tvButton(x.pair)+
     '<span class="push-right" style="color:var(--text)">'+fmt(x.pair,x.price)+'</span>'+
     '<span class="mini" style="color:var(--text2);min-width:74px;text-align:right">'+dist+'</span>'+
+    aiTag+
     detailPanel(x)+
   '</div>';
 }
@@ -1622,7 +1700,9 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadAoi(), loadDailySr(), loadJournal(), loadMatrix() ]);
+  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadMatrix() ]);
+  // AOI, Daily S/R and Trade Journal panels were removed - their loaders are
+  // no longer polled so the dashboard stops making requests nothing displays.
 }
 
 // ---- APPROACH alerts: fire when price nears a zone, BEFORE it taps ----
