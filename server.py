@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "4.2"
+SERVER_VERSION = "4.4"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "LuxAlgo parity: swing 50, OB caps, internal OBs"
+SERVER_NOTES   = "shallow-in-zone state, trend staleness"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -432,6 +432,36 @@ def _session_ok(entry):
         entry['sessionSkip'] = (h in SKIP_HOURS)
     except Exception:
         entry['sessionSkip'] = False
+
+
+def _penetration_of(res):
+    """
+    Fraction of the way price has travelled into the 4H OB it is nearest to,
+    measured from the edge price enters by (top for demand, bottom for supply),
+    together with the depth the engine currently demands before arming.
+
+    Returns {} when price is not actually inside the zone.
+    """
+    try:
+        lo, hi = res.near_ob_low, res.near_ob_high
+        px = res.price
+        if lo is None or hi is None or px is None:
+            return {}
+        depth = hi - lo
+        if depth <= 0 or not (lo <= px <= hi):
+            return {}
+        if res.near_ob_bias == BULLISH:
+            pen = (hi - px) / depth          # demand: entered from above
+        else:
+            pen = (px - lo) / depth          # supply: entered from below
+        pen = max(0.0, min(1.0, pen))
+        return {
+            'inZone': True,
+            'penetration': round(pen, 3),
+            'penetrationNeeded': round(engine.arm_penetration, 3),
+        }
+    except Exception:
+        return {}
 
 
 def _watch_as_entry(w, c4, c15):
@@ -961,6 +991,13 @@ def scan_once():
                     'obHigh':   round(res.near_ob_high, 5),
                     'obLow':    round(res.near_ob_low, 5),
                     'distancePips': res.near_distance_pips,
+                    # How deep INTO the zone price already is, as a fraction of
+                    # the zone's depth, plus what the current arm threshold
+                    # requires. Without this a pair where price is visibly
+                    # inside the zone on the chart just reads "0 pips away",
+                    # giving no hint that it is sitting there un-armed only
+                    # because it has not penetrated far enough yet.
+                    **_penetration_of(res),
                 })
             continue
 
@@ -1241,6 +1278,13 @@ def reanalyze_from_cache():
                     'obHigh':   round(res.near_ob_high, 5),
                     'obLow':    round(res.near_ob_low, 5),
                     'distancePips': res.near_distance_pips,
+                    # How deep INTO the zone price already is, as a fraction of
+                    # the zone's depth, plus what the current arm threshold
+                    # requires. Without this a pair where price is visibly
+                    # inside the zone on the chart just reads "0 pips away",
+                    # giving no hint that it is sitting there un-armed only
+                    # because it has not penetrated far enough yet.
+                    **_penetration_of(res),
                 })
             continue
 
@@ -1560,22 +1604,42 @@ def _trend_for(clean):
     makes it available as soon as any scan data exists, at zero API cost.
     """
     t = dict(pair_trend.get(clean, {'h4': None, 'd1': None}))
-    if t.get('h4') is None:
-        with _last_scan_lock:
-            entry = None
-            for sym, val in _last_scan_candles.items():
-                if sym.replace('/', '') == clean:
-                    entry = val
-                    break
-        if entry:
-            try:
-                c4 = entry[0]
-                if c4 and len(c4) > engine.swing_length + 5:
-                    _, _, tr, _ = engine._process_structure(c4, engine.swing_length)
-                    t['h4'] = ('bull' if tr == BULLISH else ('bear' if tr == BEARISH else None))
-                    _set_trend(clean, 'h4', tr)      # remember it
-            except Exception:
-                pass
+
+    # The 4H swing trend is the direction of the LAST SWING BREAK, which can be
+    # very old: measured over 10 broker files, the break setting it was a median
+    # of 115 4H bars (19 days) back, 219 bars (36 days) at the 90th percentile.
+    # Over the same sample the swing trend disagreed with the 4H INTERNAL trend
+    # 40% of the time, and every disagreement involved a break more than a week
+    # old. Reporting that single number as "the trend" is what made the matrix
+    # say UP on a chart the user reads as clearly bearish.
+    #
+    # So alongside h4 we now report:
+    #   h4i     - the 4H internal trend (what recent structure is doing)
+    #   h4Age   - bars since the break that set h4
+    #   h4Stale - the break is old AND internal structure now disagrees
+    with _last_scan_lock:
+        entry = None
+        for sym, val in _last_scan_candles.items():
+            if sym.replace('/', '') == clean:
+                entry = val
+                break
+    c4 = entry[0] if entry else None
+    if c4 and len(c4) > engine.swing_length + 5:
+        try:
+            ph, pl, tr, _ = engine._process_structure(c4, engine.swing_length)
+            if t.get('h4') is None:
+                t['h4'] = ('bull' if tr == BULLISH else ('bear' if tr == BEARISH else None))
+                _set_trend(clean, 'h4', tr)
+            idx = ph.bar_index if tr == BULLISH else (pl.bar_index if tr == BEARISH else None)
+            if idx is not None:
+                t['h4Age'] = (len(c4) - 1) - idx
+            _, _, tri, _ = engine._process_structure(c4, engine.internal_length)
+            t['h4i'] = ('bull' if tri == BULLISH else ('bear' if tri == BEARISH else None))
+            t['h4Stale'] = bool(
+                t.get('h4') and t.get('h4i') and t['h4'] != t['h4i']
+                and (t.get('h4Age') or 0) > 40)
+        except Exception:
+            pass
     return t
 
 
@@ -1625,6 +1689,10 @@ def get_matrix():
         conf = e.get('confluence') if e else None
         prime = bool(e.get('srPrime')) if e else False
         near_pips = wat.get(clean, {}).get('distancePips')
+        _w = wat.get(clean, {})
+        in_zone = bool(_w.get('inZone'))
+        pen_now = _w.get('penetration')
+        pen_need = _w.get('penetrationNeeded')
 
         # ── 15m structure ──
         if e:
@@ -1662,6 +1730,7 @@ def get_matrix():
         # ── trend: 4H (primary) and Daily (context) ──
         tr = _trend_for(clean)
         h4, d1 = tr.get('h4'), tr.get('d1')
+        h4i, h4_age, h4_stale = tr.get('h4i'), tr.get('h4Age'), tr.get('h4Stale')
         # do the two timeframes agree, and does the setup agree with them?
         tf_align = (h4 is not None and h4 == d1)
         with_trend = (bias is not None and h4 is not None and bias == h4)
@@ -1669,9 +1738,11 @@ def get_matrix():
         rows.append({
             'pair': clean, 'price': price,
             'trendH4': h4, 'trendD1': d1,
+            'trendH4i': h4i, 'trendH4Age': h4_age, 'trendH4Stale': h4_stale,
             'tfAlign': tf_align, 'withTrend': with_trend,
             'ob': ob_state, 'bias': bias, 'nearPips': near_pips,
             'tappedOnly': tapped_only, 'tappedHours': tapped_hours,
+            'inZone': in_zone, 'penetration': pen_now, 'penetrationNeeded': pen_need,
             'obType': (e or wat.get(clean, {})).get('obType'),
             'obLow': e.get('obLow') if e else None,
             'obHigh': e.get('obHigh') if e else None,
