@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "4.0"
+SERVER_VERSION = "4.2"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "AOI scan off by default, armed chart read, panels removed"
+SERVER_NOTES   = "LuxAlgo parity: swing 50, OB caps, internal OBs"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -169,7 +169,13 @@ SR_MAX          = int(os.environ.get('SR_MAX', '6'))        # max channels
 # pivots rarely form, so almost no OBs are detected and nothing ever arms.
 # 25 still captures meaningful swings while actually producing OBs. Lower it
 # for more (smaller) OBs, raise it for fewer (larger-swing) OBs.
-SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '25'))
+# Matched to the LuxAlgo 'Show Swings Points' value on the user's own chart
+# (50). The engine previously used 25, so its swing pivots - and therefore
+# its swing order blocks - sat at different places from the zones drawn on
+# TradingView. Measured cost of matching: 0.663R -> 0.634R average over
+# 10 files / 5 windows, both positive in 5/5. A fraction of an R is worth
+# paying for the dashboard and the chart agreeing.
+SWING_LENGTH = int(os.environ.get('SWING_LENGTH', '50'))
 
 # htf_trend_filter: only arm OBs aligned with the 4H swing trend (bearish trend
 # => only short/supply OBs; bullish => only long/demand OBs). OFF by default so
@@ -204,7 +210,30 @@ DAILY_SR_MAX      = int(os.environ.get('DAILY_SR_MAX', '6'))
 DAILY_SR_MINSTR   = int(os.environ.get('DAILY_SR_MIN_STRENGTH', '2'))
 DAILY_SR_WPCT     = float(os.environ.get('DAILY_SR_WIDTH_PCT', '4'))
 
+# swing_only: when True the engine uses ONLY 4H SWING order blocks and ignores
+# INTERNAL ones (the shorter-lookback blocks LuxAlgo draws as the faint zones).
+# This was the single biggest source of "it reacted off a zone on TradingView
+# but the dashboard never armed": roughly 85% of valid zones are internal, and
+# they were invisible.
+#
+# Measured over 10 broker files, 5 walk-forward windows, with realistic costs
+# (1.5 pip spread charged as spread/stop, no sub-8-pip stops):
+#   swing only        75 trades   72.0% win   0.789R   59.1R total
+#   swing + internal 517 trades   66.0% win   0.663R  342.8R total
+# The internal blocks add 444 trades at 0.65R and 65% win, profitable on
+# 10 files out of 10. Expectancy per trade dips slightly; total return is ~6x.
+# Set SWING_ONLY=1 to go back to swing-only.
+SWING_ONLY = os.environ.get('SWING_ONLY', '0').strip() not in ('0', 'false', 'False')
+
+# LuxAlgo draws only the N newest blocks of each kind; match those counts so
+# every armed zone is one that is actually visible on the chart.
+MAX_SWING_OBS    = int(os.environ.get('MAX_SWING_OBS', '5'))
+MAX_INTERNAL_OBS = int(os.environ.get('MAX_INTERNAL_OBS', '2'))
+
 engine = SMCEngine(swing_length=SWING_LENGTH, internal_length=5,
+                   swing_only=SWING_ONLY,
+                   max_swing_obs=MAX_SWING_OBS,
+                   max_internal_obs=MAX_INTERNAL_OBS,
                    first_tap_only=FIRST_TAP_ONLY,
                    mitigation_window=MIT_WINDOW,
                    arm_penetration=ARM_PENETRATION,
@@ -1643,6 +1672,7 @@ def get_matrix():
             'tfAlign': tf_align, 'withTrend': with_trend,
             'ob': ob_state, 'bias': bias, 'nearPips': near_pips,
             'tappedOnly': tapped_only, 'tappedHours': tapped_hours,
+            'obType': (e or wat.get(clean, {})).get('obType'),
             'obLow': e.get('obLow') if e else None,
             'obHigh': e.get('obHigh') if e else None,
             'ltf': ltf, 'ltfState': ltf_state,
@@ -2351,38 +2381,4 @@ def backtest():
      &middot; {settings['pairs']} pairs &middot; {HTF_TF}/{LTF_TF}
      {('&middot; no data: ' + ', '.join(errors)) if errors else ''}</p>
     <div>
-      <div class=kpi><b style='color:{"#3fd68b" if (wr or 0)>=50 else "#ff5d6c"}'>{wr if wr is not None else '-'}%</b><span>WIN RATE</span></div>
-      <div class=kpi><b style='color:{"#3fd68b" if (summary['totalR'] or 0)>0 else "#ff5d6c"}'>{summary['totalR']}R</b><span>TOTAL R</span></div>
-      <div class=kpi><b>{summary['avgR']}R</b><span>AVG R</span></div>
-      <div class=kpi><b>{summary['profitFactor']}</b><span>PROFIT FACTOR</span></div>
-      <div class=kpi><b>{summary['trades']}</b><span>TRADES</span></div>
-      <div class=kpi><b>{summary['avgMfeR']}R</b><span>AVG MFE</span></div>
-      <div class=kpi><b>{summary['neverReached1R']}</b><span>NEVER HIT 1R</span></div>
-    </div>
-    <p style='color:#f0b429;font-size:11px'>Simulated on the Twelve Data feed. No spread, commission or slippage —
-    real results will be worse. When a bar spans both SL and TP it is counted as a LOSS.</p>
-    {tbl('BY OB GRADE', summary['byGrade'])}
-    {tbl('BY CONFLUENCE', summary['byConfluence'])}
-    {tbl('BY SESSION', summary['bySession'])}
-    {tbl('BY PAIR', summary['byPair'])}
-    <h3>TRADES</h3>
-    <table><tr><th>opened</th><th>pair</th><th>dir</th><th>grade</th><th>conf</th>
-    <th>stop</th><th>exit</th><th>R</th><th>MFE</th><th>bars</th></tr>{rows}</table>
-    </body></html>"""
-    return Response(html, mimetype='text/html')
-
-
-# ── Start background scanner when app boots ──
-if API_KEY:
-    t = threading.Thread(target=scan_loop, daemon=True)
-    t.start()
-    if AOI_ENABLED:
-        t_aoi = threading.Thread(target=aoi_loop, daemon=True)
-        t_aoi.start()
-else:
-    scan_log['last_error'] = 'No TWELVE_DATA_KEY set — add it in Railway Variables'
-
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+      <div class=kpi><b style='color:{"#3fd68b" if (wr or 0)>=50 else "#
