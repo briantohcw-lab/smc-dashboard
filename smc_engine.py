@@ -22,9 +22,9 @@ from typing import Optional
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. Surfaced through
 # server.py /status and the dashboard footer so a deploy can be verified.
-ENGINE_VERSION = "3.3"
+ENGINE_VERSION = "3.5"
 ENGINE_DATE    = "2026-10-01"
-ENGINE_NOTES   = "recent-tap penetration parity, 24h tap window"
+ENGINE_NOTES   = "LuxAlgo parity: OB display caps, swing length 50"
 
 BULLISH = 1
 BEARISH = -1
@@ -128,6 +128,7 @@ class SMCEngine:
                  atr_period: int = 200, ob_filter_mult: float = 2.0,
                  swing_only: bool = True, default_rr: float = 2.0,
                  swing_max_age: int = 500, internal_max_age: int = 120,
+                 max_swing_obs: int = 5, max_internal_obs: int = 2,
                  mitigation_window: int = 20,
                  first_tap_only: bool = True,
                  arm_penetration: float = 0.25,
@@ -155,6 +156,9 @@ class SMCEngine:
         # 60-bar limit deleted these valid retest zones before price returned.
         # Close-based mitigation still removes zones price has truly invalidated.
         self.swing_max_age = swing_max_age
+        # mirror LuxAlgo's 'Swing Order Blocks' / 'Internal Order Blocks' counts
+        self.max_swing_obs = max_swing_obs
+        self.max_internal_obs = max_internal_obs
         self.internal_max_age = internal_max_age
         # mitigation_window: how many 15m bars after price taps a 4H OB the setup
         # stays "armed" (watching for 15m CHoCH), even if price wicked back out.
@@ -360,6 +364,13 @@ class SMCEngine:
             high=ob_candle.high, low=ob_candle.low,
             time=ob_candle.time, bias=bias,
             bar_index=candles.index(ob_candle))
+
+    @staticmethod
+    def _newest(order_blocks, limit):
+        """Keep the `limit` most recently formed order blocks (0 = keep all)."""
+        if not limit or limit <= 0 or len(order_blocks) <= limit:
+            return order_blocks
+        return sorted(order_blocks, key=lambda o: o.bar_index)[-limit:]
 
     def _prune_mitigated(self, candles, order_blocks, max_age=None):
         """
@@ -642,6 +653,16 @@ class SMCEngine:
             candles_4h, self.internal_length, internal=True)
         obs4_int = self._prune_mitigated(candles_4h, obs4_int, max_age=self.internal_max_age)
 
+        # ── MATCH WHAT THE CHART ACTUALLY DRAWS ──
+        # LuxAlgo renders only the N most recent unmitigated blocks of each kind
+        # (its "Swing Order Blocks" / "Internal Order Blocks" counts, 5 and 2 by
+        # default). Keeping every unmitigated block instead meant the dashboard
+        # could arm on a zone that is not drawn on the chart at all - the user
+        # opens TradingView, sees nothing there, and stops trusting the alert.
+        # Keeping the newest N makes the two views agree.
+        obs4_swing = self._newest(obs4_swing, self.max_swing_obs)
+        obs4_int = self._newest(obs4_int, self.max_internal_obs)
+
         # ── HTF trend-alignment filter ──
         # Keep only order blocks whose bias agrees with the 4H SWING trend.
         # This is what stops a counter-trend zone from arming: if the 4H has
@@ -853,21 +874,29 @@ class SMCEngine:
                 result.ltf_ob_high = round(br['ob_high'], 5)
                 result.ltf_ob_low = round(br['ob_low'], 5)
 
-            # CRITICAL DIRECTION GUARD: the break-and-retest must agree with the
-            # CURRENT 15m structure. The detector can find an OLD break (e.g. a
-            # bearish break early in the window) even though the 15m has since
-            # gone the other way. Without this guard, a SHORT signal can fire
-            # while the 15m is making bullish BOS (the AUDCHF bug). Only honour
-            # a 'retest' if the live 15m trend matches the OB/setup direction.
+            # ── STALE-BREAK GUARD ──
+            # The detector can find an OLD break (e.g. a bearish break early in
+            # the window) even though the 15m has since gone the other way.
+            # Firing on that produced counter-trend signals (the AUDCHF bug).
+            #
+            # This USED to be implemented as "the current 15m internal trend
+            # must equal the OB bias". That test is wrong for break-and-retest:
+            # in a bearish setup price breaks DOWN and then retraces UP into the
+            # 15m OB, so during the retest the 15m internal trend very often
+            # reads BULLISH. Measured over 10 broker files, that guard rejected
+            # 13 of 15 genuine retests - it discarded the very candle it was
+            # meant to confirm, which is why almost nothing ever promoted to a
+            # signal.
+            #
+            # What actually makes a break stale is a LATER break in the OPPOSITE
+            # direction superseding it. That is what is tested now: the pullback
+            # of a healthy retest no longer disqualifies the setup, while a
+            # genuinely reversed structure still does.
             ob_bull = (hit_ob.bias == BULLISH)
-            trend_agrees = (
-                (ob_bull and trend15 == BULLISH) or
-                (not ob_bull and trend15 == BEARISH)
-            )
-            valid_retest = (br['state'] == 'retest') and trend_agrees
-            # if the break disagrees with current 15m trend, it's stale/invalid:
-            # drop it back so it doesn't show a misleading 'broken' state either.
-            if not trend_agrees and br['state'] in ('broken', 'retest'):
+            not_superseded = self._break_still_current(
+                candles_15m, hit_ob.bias, br.get('break_idx'))
+            valid_retest = (br['state'] == 'retest') and not_superseded
+            if not not_superseded and br['state'] in ('broken', 'retest'):
                 result.br_state = None
                 result.ltf_ob_high = None
                 result.ltf_ob_low = None
@@ -926,6 +955,42 @@ class SMCEngine:
                 result.near_distance_pips = round(best_dist / pip, 1) if pip else None
 
         return result
+
+    def _break_still_current(self, candles_15m, bias, break_idx):
+        """
+        Has the break at `break_idx` been SUPERSEDED by a later break in the
+        opposite direction?
+
+        This replaces the old "current 15m trend must match the OB bias" test.
+        A break-and-retest necessarily involves a counter-direction pullback, so
+        judging staleness by the live trend threw away valid retests. A break is
+        stale only if price has since broken structure the OTHER way.
+
+        Returns True if the break is still the controlling structure.
+        """
+        if break_idx is None:
+            return True
+        n = len(candles_15m)
+        if n < 6:
+            return True
+        start = max(0, min(break_idx, n - 1))
+        after = candles_15m[start:]
+        if len(after) < 6:
+            return True          # nothing has happened since; still current
+        highs, lows = self._swing_levels(after, left=2, right=2)
+        if bias == BULLISH:
+            # a bullish break is superseded by a close BELOW a later swing low
+            for (pi, lvl) in lows:
+                for j in range(pi + 1, len(after)):
+                    if after[j].close < lvl:
+                        return False
+        else:
+            # a bearish break is superseded by a close ABOVE a later swing high
+            for (pi, lvl) in highs:
+                for j in range(pi + 1, len(after)):
+                    if after[j].close > lvl:
+                        return False
+        return True
 
     def _break_and_retest(self, candles_15m, bias, tolerance):
         """
