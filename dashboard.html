@@ -235,6 +235,19 @@
     border-radius:4px;background:transparent;color:var(--text3);
     border:1px solid var(--border2);cursor:pointer}
   .adv-reset:hover{color:var(--text);border-color:var(--text3)}
+  .ta-caveat{font-size:9px;line-height:1.65;color:var(--text3);padding:0 4px 10px 4px}
+  .ta-caveat b{color:var(--warn)}
+  .ta-card{border:1px solid var(--border);border-radius:7px;padding:12px 13px;margin-bottom:9px}
+  .ta-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+  .ta-pair{font-weight:600;letter-spacing:0.04em}
+  .ta-state{font-size:8px;letter-spacing:0.08em;padding:2px 7px;border-radius:4px;
+    border:1px solid var(--border2);color:var(--text3)}
+  .ta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px}
+  .ta-item{background:rgba(255,255,255,0.02);border-radius:5px;padding:7px 8px}
+  .ta-l{font-size:8px;letter-spacing:0.09em;color:var(--text3);margin-bottom:3px}
+  .ta-v{font-size:12px;color:var(--text)}
+  .ta-bar{height:3px;border-radius:2px;background:var(--border2);margin-top:5px;overflow:hidden}
+  .ta-fill{height:100%;border-radius:2px;background:var(--accent)}
   .c-shallow{background:rgba(240,180,41,0.07);color:var(--warn);
     border:1px dashed rgba(240,180,41,0.45)}
   .c-tstale{background:rgba(200,211,224,0.06);color:var(--text3);
@@ -567,6 +580,17 @@
   </section>
 
   <section>
+    <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>⌁ TECHNICAL ANALYSIS — ARMED PAIRS<span class="sec-count" id="c-ta">0</span></div>
+    <div class="ta-caveat">Context only. All of these were tested against 718 backtested trades:
+      4H RSI, MACD and distance-from-EMA showed <b>no pattern at all</b>; the ATR
+      volatility gradient <b>failed</b> window-by-window; 15m RSI extremes beat the
+      middle (0.738R vs 0.563R) in only <b>3 of 5</b> windows. Nothing here is a
+      validated filter — read it as background on a pair you are already watching,
+      not as a reason to take or skip the trade.</div>
+    <div id="taList"></div>
+  </section>
+
+  <section>
     <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>◈ OPEN TRADES — TRACKED<span class="sec-count" id="c-open">0</span></div>
     <div id="openList"></div>
   </section>
@@ -586,7 +610,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "4.5";
+const DASH_VERSION = "4.6";
 const DASH_DATE    = "2026-10-01";
 
 // ---- interactive state ----
@@ -1807,7 +1831,7 @@ function updateClock(){
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadMatrix() ]);
+  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadMatrix(), loadAnalysis() ]);
   // AOI, Daily S/R and Trade Journal panels were removed - their loaders are
   // no longer polled so the dashboard stops making requests nothing displays.
 }
@@ -2121,6 +2145,94 @@ async function resetStrategyDefaults(){
   await getJSON(q);
   await syncSettingsUI();
   refreshAll();
+}
+
+// ── TECHNICAL ANALYSIS page ──────────────────────────────────────────────
+// One card per armed/signalling pair. Every reading is labelled with what it
+// means rather than left as a bare number, and nothing here is presented as a
+// trade filter - the testing behind that caveat is in the section header.
+function taCard(x){
+  const bull = x.bias==='bull';
+  const dir  = bull ? 'LONG' : 'SHORT';
+  const dcol = bull ? 'var(--bull)' : 'var(--bear)';
+
+  function item(label, value, note, pct, col){
+    if(value===null || value===undefined || value==='') return '';
+    return '<div class="ta-item"><div class="ta-l">'+label+'</div>'+
+      '<div class="ta-v"'+(col?' style="color:'+col+'"':'')+'>'+value+'</div>'+
+      (note?'<div class="ta-l" style="margin:3px 0 0 0;letter-spacing:0.02em">'+note+'</div>':'')+
+      (pct!=null?'<div class="ta-bar"><div class="ta-fill" style="width:'+
+        Math.max(0,Math.min(100,pct))+'%'+(col?';background:'+col:'')+'"></div></div>':'')+
+      '</div>';
+  }
+
+  function rsiNote(v){
+    if(v==null) return ['',null];
+    if(v<=30) return ['oversold', 'var(--bull)'];
+    if(v>=70) return ['overbought', 'var(--bear)'];
+    return ['mid-range — the least informative zone in testing', 'var(--text3)'];
+  }
+  const r4 = rsiNote(x.rsi4), r15 = rsiNote(x.rsi15);
+
+  let volNote = '';
+  if(x.atrPct!=null){
+    volNote = x.atrPct>=75 ? 'high vs its own last 100 bars'
+            : x.atrPct<=25 ? 'quiet vs its own last 100 bars'
+            : 'normal vs its own last 100 bars';
+  }
+
+  let state = x.state==='signal' ? 'SIGNAL' : 'ARMED';
+  if(x.tappedOnly) state = 'TAPPED & LEFT';
+  let phase = '';
+  if(x.brState==='retest')      phase = '15m broke AND retested — trigger met';
+  else if(x.brState==='broken') phase = '15m broke — waiting on the retest';
+  else                          phase = '15m has not broken structure yet';
+
+  return '<div class="ta-card">'+
+    '<div class="ta-top">'+
+      '<span class="ta-pair">'+safe(x.pair,'—')+'</span>'+
+      '<span class="mini" style="color:'+dcol+'">'+(bull?'▲ ':'▼ ')+dir+'</span>'+
+      '<span class="ta-state">'+state+'</span>'+
+      (x.obType?'<span class="ta-state">'+x.obType+' OB</span>':'')+
+      tvButton(x.pair)+
+      '<span class="push-right mini" style="color:var(--text2)">'+phase+'</span>'+
+    '</div>'+
+    '<div class="ta-grid">'+
+      item('PRICE', fmt(x.pair,x.price)) +
+      item('4H OB ZONE', (x.obLow!=null? fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh):null)) +
+      item('4H RSI(14)', x.rsi4, r4[0], x.rsi4, r4[1]) +
+      item('15M RSI(14)', x.rsi15, r15[0], x.rsi15, r15[1]) +
+      item('ATR (4H)', (x.atrPips!=null? x.atrPips+' pips':null),
+           'typical 4H candle range') +
+      item('VOLATILITY', (x.atrPct!=null? x.atrPct+'th pct':null), volNote, x.atrPct) +
+      item('VS EMA50', (x.ema50Dist!=null? (x.ema50Dist>0?'+':'')+x.ema50Dist+' ATR':null),
+           (x.ema50Dist!=null? (Math.abs(x.ema50Dist)>2?'stretched from the mean':'near the mean'):'')) +
+      item('VS EMA20', (x.ema20Dist!=null? (x.ema20Dist>0?'+':'')+x.ema20Dist+' ATR':null)) +
+      item('MACD HIST', (x.macdH!=null? (x.macdH>0?'+':'')+x.macdH+'p':null),
+           (x.macdH!=null? (x.macdH>0?'momentum up':'momentum down'):'')) +
+      item('20-BAR RANGE', (x.range20Pips!=null? x.range20Pips+' pips':null)) +
+      item('POSITION IN RANGE', (x.rangePos!=null? x.rangePos+'%':null),
+           (x.rangePos!=null? (x.rangePos>70?'near the top':(x.rangePos<30?'near the bottom':'mid-range')):''),
+           x.rangePos) +
+      item('STOP', (x.slPips!=null? x.slPips+' pips':null),
+           (x.rr!=null? 'target '+Number(x.rr).toFixed(1)+'R':'')) +
+      item('GRADE', x.obGrade, 'not predictive in testing') +
+      item('CONFLUENCE', (x.confluence!=null? x.confluence+'/10':null)) +
+    '</div>'+
+    (x.ai && x.ai.note ? '<div class="ai-note" style="margin-top:9px">'+
+        (x.ai.label?'<b style="color:var(--accent)">'+x.ai.label+'</b> — ':'')+x.ai.note+'</div>' : '')+
+  '</div>';
+}
+
+async function loadAnalysis(){
+  const d = await getJSON('/analysis');
+  const el = $('taList');
+  if(!el) return;
+  const rows = (d && Array.isArray(d.pairs)) ? d.pairs : [];
+  setText('c-ta', rows.length);
+  el.innerHTML = rows.length
+    ? rows.map(taCard).join('')
+    : '<div class="empty">NOTHING ARMED RIGHT NOW<div class="sub">THIS FILLS WHEN A PAIR REACHES A 4H OB…</div></div>';
 }
 
 async function syncSettingsUI(){
