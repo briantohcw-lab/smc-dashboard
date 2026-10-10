@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "4.4"
+SERVER_VERSION = "4.5"
 SERVER_DATE    = "2026-07-30"
-SERVER_NOTES   = "shallow-in-zone state, trend staleness"
+SERVER_NOTES   = "technical analysis page, shallow-in-zone state"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -432,6 +432,154 @@ def _session_ok(entry):
         entry['sessionSkip'] = (h in SKIP_HOURS)
     except Exception:
         entry['sessionSkip'] = False
+
+
+# ── TECHNICAL ANALYSIS ───────────────────────────────────────────────────
+# Classic indicators computed from the candles the scanner has ALREADY fetched,
+# so this costs no API credits.
+#
+# A deliberate note on what these are for. Every one of them was tested against
+# 718 backtested trades and then re-checked window by window:
+#   4H RSI        - flat across every bucket (0.43-0.68R, no pattern)
+#   4H MACD       - flat (0.34-0.62R, no pattern)
+#   price vs EMA50- flat (0.44-0.82R, no ordering)
+#   ATR regime    - looked monotonic pooled, but mid-volatility beat high
+#                   volatility window by window, so the gradient was an artifact
+#   15m RSI       - extremes (<=30 or >=70) beat the middle 0.738R vs 0.563R,
+#                   but only in 3 of 5 windows: suggestive, not established
+# None of them is a reliable filter on this strategy. They are shown as CONTEXT
+# for a pair you are already looking at, never as a reason to take or skip a
+# trade. The page says so too, so the numbers cannot quietly become rules.
+
+def _ema_series(vals, period):
+    if not vals:
+        return []
+    k = 2.0 / (period + 1)
+    out = [vals[0]]
+    for v in vals[1:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
+
+
+def _rsi(candles, period=14):
+    if len(candles) < period + 1:
+        return None
+    gain = loss = 0.0
+    for i in range(len(candles) - period, len(candles)):
+        d = candles[i].close - candles[i - 1].close
+        if d >= 0:
+            gain += d
+        else:
+            loss -= d
+    if loss == 0:
+        return 100.0
+    rs = (gain / period) / (loss / period)
+    return round(100 - 100 / (1 + rs), 1)
+
+
+def _true_ranges(candles):
+    trs = []
+    for i in range(1, len(candles)):
+        h, l, pc = candles[i].high, candles[i].low, candles[i - 1].close
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    return trs
+
+
+def _atr_percentile(candles, period=14, lookback=100):
+    """Current ATR as a percentile of its own recent history (0-100)."""
+    trs = _true_ranges(candles)
+    if len(trs) < period + lookback:
+        return None
+    series = [sum(trs[i - period:i]) / period for i in range(period, len(trs) + 1)]
+    if len(series) < lookback:
+        return None
+    cur, hist = series[-1], series[-lookback:]
+    return round(100.0 * sum(1 for x in hist if x <= cur) / len(hist))
+
+
+def _macd_hist(candles, fast=12, slow=26, sig=9):
+    cl = [c.close for c in candles]
+    if len(cl) < slow + sig:
+        return None
+    f, sl = _ema_series(cl, fast), _ema_series(cl, slow)
+    line = [a - b for a, b in zip(f, sl)]
+    signal = _ema_series(line, sig)
+    return line[-1] - signal[-1]
+
+
+def _technicals(pair, c4, c15):
+    """Indicator snapshot for one pair, from cached candles only."""
+    out = {'pair': pair}
+    try:
+        pip = engine._pip_size(pair)
+    except Exception:
+        pip = 0.0001
+    if c4 and len(c4) > 30:
+        cl = [c.close for c in c4]
+        px = cl[-1]
+        out['rsi4'] = _rsi(c4, 14)
+        out['atrPct'] = _atr_percentile(c4, 14, 100)
+        trs = _true_ranges(c4)
+        atr = sum(trs[-14:]) / 14 if len(trs) >= 14 else None
+        out['atrPips'] = round(atr / pip, 1) if (atr and pip) else None
+        for per in (20, 50):
+            e = _ema_series(cl, per)[-1] if len(cl) >= per else None
+            out['ema%d' % per] = round(e, 5) if e is not None else None
+            if e is not None and atr:
+                out['ema%dDist' % per] = round((px - e) / atr, 2)
+        mh = _macd_hist(c4)
+        out['macdH'] = round(mh / pip, 1) if (mh is not None and pip) else None
+        hi = max(c.high for c in c4[-20:]); lo = min(c.low for c in c4[-20:])
+        out['range20Pips'] = round((hi - lo) / pip, 1) if pip else None
+        out['rangePos'] = round(100 * (px - lo) / (hi - lo)) if hi > lo else None
+    if c15 and len(c15) > 30:
+        out['rsi15'] = _rsi(c15, 14)
+    return out
+
+
+@app.route('/analysis')
+def get_analysis():
+    """
+    Indicator context for every pair currently ARMED, signalling, or recently
+    tapped. Built from the last scan's cached candles - no API credits.
+    """
+    with _lock:
+        rows = [dict(x) for x in (signals + armed)]
+    seen = set()
+    out = []
+    for e in rows:
+        pair = e.get('pair')
+        if not pair or pair in seen:
+            continue
+        seen.add(pair)
+        with _last_scan_lock:
+            cc = None
+            for sym, val in _last_scan_candles.items():
+                if sym.replace('/', '') == pair:
+                    cc = val
+                    break
+        if not cc:
+            continue
+        t = _technicals(pair, cc[0], cc[1])
+        t.update({
+            'bias': e.get('bias'),
+            'price': e.get('price'),
+            'obLow': e.get('obLow'), 'obHigh': e.get('obHigh'),
+            'obType': e.get('obType'),
+            'state': 'signal' if e.get('aligned') else 'armed',
+            'tappedOnly': bool(e.get('mitigated')),
+            'barsSinceMit': e.get('barsSinceMit'),
+            'brState': e.get('brState'),
+            'confluence': e.get('confluence'),
+            'obGrade': e.get('obGrade'),
+            'respectScore': e.get('respectScore'),
+            'slPrice': e.get('slPrice'), 'tpPrice': e.get('tpPrice'),
+            'slPips': e.get('slPips'), 'rr': e.get('rr'),
+            'htfTrend': e.get('htfTrend'),
+            'ai': e.get('ai'),
+        })
+        out.append(t)
+    return jsonify({'pairs': out, 'count': len(out)})
 
 
 def _penetration_of(res):
