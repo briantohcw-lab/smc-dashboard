@@ -239,6 +239,26 @@
     line-height:1.6;background:rgba(255,93,108,0.08);
     border:1px solid rgba(255,93,108,0.4);color:var(--text)}
   .stale-entry b{color:var(--bear)}
+  .ta-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .ta-tab{display:flex;align-items:center;gap:6px;font:inherit;font-size:10px;
+    letter-spacing:0.06em;padding:6px 11px;border-radius:6px;cursor:pointer;
+    background:transparent;color:var(--text2);border:1px solid var(--border2)}
+  .ta-tab i{width:6px;height:6px;border-radius:50%;display:inline-block}
+  .ta-tab b{font-weight:400;color:var(--text3);font-size:9px}
+  .ta-tab:hover{color:var(--text);border-color:var(--text3)}
+  .ta-tab.active{background:rgba(88,166,255,0.10);color:var(--text);
+    border-color:var(--accent)}
+  .ta-tab.active b{color:var(--text2)}
+  .ta-score{font-size:9px;letter-spacing:0.06em;color:var(--text3)}
+  .tone-good{border-color:var(--bull);color:var(--bull);background:rgba(63,214,139,0.08)}
+  .tone-warn{border-color:var(--warn);color:var(--warn);background:rgba(240,180,41,0.08)}
+  .tone-bad {border-color:var(--bear);color:var(--bear);background:rgba(255,93,108,0.08)}
+  .ck-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+    gap:6px 14px;margin:10px 0 2px 0}
+  .ck{display:flex;gap:7px;align-items:flex-start;font-size:10.5px;line-height:1.5}
+  .ck-m{flex-shrink:0;font-size:10px;line-height:1.5}
+  .ck-y .ck-m{color:var(--bull)} .ck-y{color:var(--text)}
+  .ck-n .ck-m{color:var(--bear)} .ck-n{color:var(--text2)}
   .tc-title{font-size:8px;letter-spacing:0.12em;color:var(--text3);margin-bottom:3px}
   .tc-fk{font-size:7px;fill:var(--warn)}
   .tc-ring{width:7px;height:7px;border-radius:50%;display:inline-block;
@@ -627,8 +647,8 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "5.2";
-const DASH_DATE    = "2026-10-11";
+const DASH_VERSION = "5.5";
+const DASH_DATE    = "2026-10-12";
 
 // ---- interactive state ----
 const filters = { dir: 'all', conf: 0 };
@@ -2234,7 +2254,23 @@ function taChart(x){
   // Everything in the price panel is clipped to it. Without this an EMA that
   // runs far below the visible candles keeps drawing downward and crosses into
   // the RSI panel underneath, which looked like a second data series.
-  let lbl = '';            // right-edge labels, drawn outside the clip
+  // Right-edge labels are collected rather than drawn immediately, so that
+  // overlapping ones can be nudged apart before rendering. Several of them
+  // (last price, zone edges, EMAs) legitimately land within a pixel or two of
+  // each other and were printing on top of one another.
+  const LBL = [];
+  function addLbl(y, text, fill){ LBL.push({y:y, t:text, f:fill||'var(--text3)'}); }
+  function flushLbls(){
+    LBL.sort(function(a,b){ return a.y-b.y; });
+    const MIN = 9;
+    for(let i=1;i<LBL.length;i++)
+      if(LBL[i].y - LBL[i-1].y < MIN) LBL[i].y = LBL[i-1].y + MIN;
+    return LBL.map(function(L){
+      return '<text x="'+(PL+pw+4)+'" y="'+L.y.toFixed(1)+'" class="tc-ax" fill="'+
+             L.f+'">'+L.t+'</text>';
+    }).join('');
+  }
+  let lbl = '';            // kept for compatibility; labels go through LBL
   const CID = 'tcclip-' + String(x.pair||'p').replace(/[^A-Za-z0-9]/g,'');
   let g = '<defs><clipPath id="'+CID+'"><rect x="'+PL+'" y="'+PT+
           '" width="'+pw+'" height="'+ph+'"/></clipPath></defs><g clip-path="url(#'+CID+')">';
@@ -2250,8 +2286,7 @@ function taChart(x){
          '<line x1="'+PL+'" x2="'+(PL+pw)+'" y1="'+y2.toFixed(1)+'" y2="'+y2.toFixed(1)+
            '" stroke="'+zc+'" stroke-width="1" opacity="0.55"/>'+
          '';
-    lbl += '<text x="'+(PL+pw+4)+'" y="'+(y1+3).toFixed(1)+'" class="tc-ax">'+fmt(x.pair,x.obHigh)+'</text>'+
-           '<text x="'+(PL+pw+4)+'" y="'+(y2+3).toFixed(1)+'" class="tc-ax">'+fmt(x.pair,x.obLow)+'</text>';
+    addLbl(y1+3, fmt(x.pair,x.obHigh)); addLbl(y2+3, fmt(x.pair,x.obLow));
   }
 
   // stop / target, dashed so they read as levels not data
@@ -2262,7 +2297,7 @@ function taChart(x){
     if(y < PT || y > PT+ph) return;
     g += '<line x1="'+PL+'" x2="'+(PL+pw)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+
          '" stroke="'+t[1]+'" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>';
-    lbl += '<text x="'+(PL+pw+4)+'" y="'+(y+3).toFixed(1)+'" class="tc-ax" fill="'+t[1]+'">'+t[2]+'</text>';
+    addLbl(y+3, t[2], t[1]);
   });
 
   // candles
@@ -2297,17 +2332,16 @@ function taChart(x){
     }
     g += '<path d="'+d+'" fill="none" stroke="'+e[1]+'" stroke-width="1.4" opacity="0.75"/>';
     const ly = Math.max(PT+6, Math.min(PT+ph-2, Y(ser[ser.length-1])+3));
-    lbl += '<text x="'+(PL+pw+4)+'" y="'+ly.toFixed(1)+'" class="tc-ax" fill="'+e[1]+'">'+e[2]+'</text>';
+    addLbl(ly, e[2], e[1]);
   });
 
   // last price (line inside the clip, label outside)
   const last = C[C.length-1][4];
   g += '<line x1="'+PL+'" x2="'+(PL+pw)+'" y1="'+Y(last).toFixed(1)+'" y2="'+Y(last).toFixed(1)+
        '" stroke="var(--text3)" stroke-width="1" stroke-dasharray="1 3" opacity="0.7"/>';
-  lbl += '<text x="'+(PL+pw+4)+'" y="'+(Y(last)+3).toFixed(1)+'" class="tc-ax" '+
-         'fill="var(--text)">'+fmt(x.pair,last)+'</text>';
+  addLbl(Y(last)+3, fmt(x.pair,last), 'var(--text)');
 
-  g += '</g>' + lbl;   // close the clipped panel, then the right-edge labels
+  g += '</g>' + flushLbls();   // close the clipped panel, then the labels
 
   // ── RSI panel: its own plot underneath, NOT a second axis on the price chart
   let rsiG = '';
@@ -2421,6 +2455,44 @@ function taChart15(x){
          ' ATR and closed back inside\nentry idea: the next candle</title></rect>';
   });
 
+  // ── the trade map: the levels that actually define the plan ──────────
+  // entry zone (the 15m OB left by the break), the CHoCH level that was
+  // broken, the session liquidity being targeted, the stop, and the target.
+  // Without these the chart shows where price is; with them it shows the trade.
+  function hline(v, col, dash, label, align){
+    if(v==null) return;
+    const y = Y(v);
+    if(y < PT-1 || y > PT+ph+1) return;
+    g += '<line x1="'+PL+'" x2="'+(PL+pw)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+
+         '" stroke="'+col+'" stroke-width="1"'+(dash?' stroke-dasharray="'+dash+'"':'')+
+         ' opacity="0.75"/>';
+    lbl += '<text x="'+(PL+pw+4)+'" y="'+(y+3).toFixed(1)+'" class="tc-ax" fill="'+col+
+           '">'+label+'</text>';
+  }
+
+  // 15m entry zone — where the retest happens
+  if(x.ltfObLow!=null && x.ltfObHigh!=null){
+    const y1 = Y(x.ltfObHigh), y2 = Y(x.ltfObLow);
+    g += '<rect x="'+PL+'" y="'+Math.min(y1,y2).toFixed(1)+'" width="'+pw+
+         '" height="'+Math.max(2,Math.abs(y2-y1)).toFixed(1)+
+         '" fill="none" stroke="#8fb6ff" stroke-width="1" stroke-dasharray="2 2" opacity="0.9"/>'+
+         '<text x="'+(PL+6)+'" y="'+(Math.min(y1,y2)-3).toFixed(1)+
+         '" class="tc-ax" fill="#8fb6ff">entry zone</text>';
+  }
+  hline(x.chochLevel, '#b48cff', null, 'CHoCH');
+  const LV = x.levels || {};
+  if(x.bias==='bear'){
+    hline(LV.asiaHigh, 'var(--warn)', '4 3', 'Asia high');
+    hline(LV.asiaLow,  'var(--bull)', '3 3', 'Asia low');
+  } else {
+    hline(LV.asiaLow,  'var(--warn)', '4 3', 'Asia low');
+    hline(LV.asiaHigh, 'var(--bull)', '3 3', 'Asia high');
+  }
+  hline(x.slPrice, 'var(--bear)', '3 3', 'Stop');
+  if(x.liqTarget!=null)
+    hline(x.liqTarget, 'var(--bull)', '5 3',
+          'TP ' + (x.liqTargetR!=null ? x.liqTargetR+'R' : ''));
+
   g += '</g>' + lbl;
   const cap = FK.length
     ? FK.length+' fake breakout'+(FK.length>1?'s':'')+' in the last '+C.length+
@@ -2434,11 +2506,30 @@ function taChart15(x){
     '<svg class="tc" viewBox="0 0 '+W+' '+(H+4)+'" preserveAspectRatio="xMidYMid meet" '+
     'role="img" aria-label="'+safe(x.pair,'')+' 15 minute candles with fake breakout markers">'+
     g+'</svg>'+
-    '<div class="tc-legend"><span><i class="tc-ring"></i>wick pierced the edge, closed back inside</span>'+
+    '<div class="tc-legend">'+
+    '<span><i style="background:'+(x.bias==='bull'?'var(--bull)':'var(--bear)')+
+      ';opacity:.4"></i>4H OB</span>'+
+    '<span><i style="border:1px dashed #8fb6ff;background:transparent"></i>15m entry zone</span>'+
+    '<span><i style="background:#b48cff"></i>CHoCH level</span>'+
+    '<span><i style="background:var(--warn)"></i>liquidity</span>'+
+    '<span><i class="tc-ring"></i>wick pierced the edge, closed back inside</span>'+
     '<span>'+cap+'</span></div>'+
     '<div class="tc-note">Shown, not enforced. Requiring a sweep before entry measured '+
     '<b>worse</b> than taking any tap — 74 trades at 0.542R vs 387 at 0.634R — so treat a '+
     'marker as a read on who got trapped, not as a trigger on its own.</div></div>';
+}
+
+// The pass/fail checklist. Failures are shown as prominently as passes and
+// each one states the reason - "only 52% deep, under your 75% arm depth" is
+// the line that stops a bad trade, and a list of ticks alone never would.
+function checkList(x){
+  const ch = x.checks;
+  if(!ch || !ch.length) return '';
+  return '<div class="ck-grid">'+ ch.map(function(c){
+    return '<div class="ck'+(c.pass?' ck-y':' ck-n')+'">'+
+      '<span class="ck-m">'+(c.pass?'\u2713':'\u2715')+'</span>'+
+      '<span>'+c.text+'</span></div>';
+  }).join('') +'</div>';
 }
 
 function taCard(x){
@@ -2471,8 +2562,12 @@ function taCard(x){
             : 'normal vs its own last 100 bars';
   }
 
-  let state = x.state==='signal' ? 'SIGNAL' : 'ARMED';
-  if(x.tappedOnly) state = 'TAPPED & LEFT';
+  // The verdict comes first and in plain words. "ARMED" says a rule fired;
+  // "In zone but shallow, no trigger" says what you are actually looking at.
+  let state = x.stateLabel || (x.state==='signal' ? 'SIGNAL' : 'ARMED');
+  if(!x.stateLabel && x.tappedOnly) state = 'TAPPED & LEFT';
+  const toneCls = x.stateTone==='good' ? 'tone-good'
+                : x.stateTone==='bad'  ? 'tone-bad' : 'tone-warn';
   let phase = '';
   if(x.brState==='retest')      phase = '15m broke AND retested — trigger met';
   else if(x.brState==='broken') phase = '15m broke — waiting on the retest';
@@ -2482,14 +2577,18 @@ function taCard(x){
     '<div class="ta-top">'+
       '<span class="ta-pair">'+safe(x.pair,'—')+'</span>'+
       '<span class="mini" style="color:'+dcol+'">'+(bull?'▲ ':'▼ ')+dir+'</span>'+
-      '<span class="ta-state">'+state+'</span>'+
+      '<span class="ta-state '+toneCls+'">'+state+'</span>'+
+      (x.checksTotal ? '<span class="ta-score">'+x.checksPassed+' / '+x.checksTotal+
+        ' confluences</span>' : '')+
       (x.obType?'<span class="ta-state">'+x.obType+' OB</span>':'')+
       tvButton(x.pair)+
-      '<span class="push-right mini" style="color:var(--text2)">'+phase+'</span>'+
+      (x.stateLabel ? '' :
+        '<span class="push-right mini" style="color:var(--text2)">'+phase+'</span>')+
     '</div>'+
     staleEntryBanner(x)+
     taChart(x)+
     taChart15(x)+
+    checkList(x)+
     '<div class="ta-grid">'+
       item('PRICE', fmt(x.pair,x.price)) +
       item('4H OB ZONE', (x.obLow!=null? fmt(x.pair,x.obLow)+' – '+fmt(x.pair,x.obHigh):null)) +
@@ -2508,7 +2607,11 @@ function taCard(x){
            (x.rangePos!=null? (x.rangePos>70?'near the top':(x.rangePos<30?'near the bottom':'mid-range')):''),
            x.rangePos) +
       item('STOP', (x.slPips!=null? x.slPips+' pips':null),
-           (x.rr!=null? 'target '+Number(x.rr).toFixed(1)+'R':'')) +
+           (x.liqTargetR!=null
+              ? x.liqTargetR+'R to the '+(x.liqTargetName||'target')
+              : (x.rr!=null? 'target '+Number(x.rr).toFixed(1)+'R':''))) +
+      item('TARGET', (x.liqTarget!=null? fmt(x.pair,x.liqTarget):null),
+           (x.liqTargetName? 'resting liquidity at the '+x.liqTargetName:'')) +
       item('GRADE', x.obGrade, 'not predictive in testing') +
       item('CONFLUENCE', (x.confluence!=null? x.confluence+'/10':null)) +
     '</div>'+
@@ -2517,15 +2620,44 @@ function taCard(x){
   '</div>';
 }
 
+// Which pair's card is on screen. Kept across refreshes so a 15-second poll
+// does not yank you back to the first pair while you are reading another.
+let taPair = null;
+
+function taTabs(rows){
+  if(rows.length < 2) return '';
+  return '<div class="ta-tabs">'+ rows.map(function(r){
+    const act = (r.pair === taPair) ? ' active' : '';
+    const dot = r.stateTone==='good' ? 'var(--bull)'
+              : r.stateTone==='bad'  ? 'var(--bear)' : 'var(--warn)';
+    return '<button class="ta-tab'+act+'" data-tapair="'+r.pair+'">'+
+      '<i style="background:'+dot+'"></i>'+r.pair+
+      (r.checksTotal? '<b>'+r.checksPassed+'/'+r.checksTotal+'</b>':'')+'</button>';
+  }).join('') +'</div>';
+}
+
 async function loadAnalysis(){
   const d = await getJSON('/analysis');
   const el = $('taList');
   if(!el) return;
   const rows = (d && Array.isArray(d.pairs)) ? d.pairs : [];
   setText('c-ta', rows.length);
-  el.innerHTML = rows.length
-    ? rows.map(taCard).join('')
-    : '<div class="empty">NOTHING ARMED RIGHT NOW<div class="sub">THIS FILLS WHEN A PAIR REACHES A 4H OB…</div></div>';
+  if(!rows.length){
+    taPair = null;
+    el.innerHTML = '<div class="empty">NOTHING ARMED RIGHT NOW<div class="sub">THIS FILLS WHEN A PAIR REACHES A 4H OB…</div></div>';
+    return;
+  }
+  // keep the current selection if that pair is still armed
+  if(!taPair || !rows.some(function(r){ return r.pair === taPair; }))
+    taPair = rows[0].pair;
+  const cur = rows.filter(function(r){ return r.pair === taPair; });
+  el.innerHTML = taTabs(rows) + cur.map(taCard).join('');
+  el.querySelectorAll('.ta-tab').forEach(function(b){
+    b.addEventListener('click', function(){
+      taPair = b.getAttribute('data-tapair');
+      loadAnalysis();
+    });
+  });
 }
 
 async function syncSettingsUI(){
