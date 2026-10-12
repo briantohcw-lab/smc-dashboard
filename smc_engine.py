@@ -22,9 +22,9 @@ from typing import Optional
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. Surfaced through
 # server.py /status and the dashboard footer so a deploy can be verified.
-ENGINE_VERSION = "3.6"
-ENGINE_DATE    = "2026-10-11"
-ENGINE_NOTES   = "fake-breakout detection, LuxAlgo parity"
+ENGINE_VERSION = "3.7"
+ENGINE_DATE    = "2026-10-12"
+ENGINE_NOTES   = "session liquidity levels, sweep detection"
 
 BULLISH = 1
 BEARISH = -1
@@ -100,6 +100,7 @@ class SMCResult:
     currently_in_ob: bool = False    # is price literally inside the OB right now
     # ── break-and-retest of 15m OB (the entry trigger) ──
     br_state: str = None             # 'broken' (awaiting retest) | 'retest' (signal)
+    choch_level: float = None        # the 15m level whose break set br_state
     ltf_ob_high: float = None        # the 15m OB zone left by the structure break
     ltf_ob_low: float = None
     # ── nearest-OB watchlist (when NOT currently in an OB) ──
@@ -870,6 +871,7 @@ class SMCEngine:
             # Until the retest, it's "broken — awaiting retest" (still ARMED).
             br = self._break_and_retest(candles_15m, hit_ob.bias, tol)
             result.br_state = br['state'] if br['state'] != 'none' else None
+            result.choch_level = br.get('choch_level')
             if br['state'] in ('broken', 'retest'):
                 result.ltf_ob_high = round(br['ob_high'], 5)
                 result.ltf_ob_low = round(br['ob_low'], 5)
@@ -955,6 +957,78 @@ class SMCEngine:
                 result.near_distance_pips = round(best_dist / pip, 1) if pip else None
 
         return result
+
+    def session_levels(self, candles_15m, lookback_bars=192):
+        """
+        The liquidity levels traders actually target: the high and low of the
+        most recent completed Asian session, and of the previous day.
+
+        These are where resting stop orders cluster. A move that takes one and
+        fails is the sweep this strategy is built around, and the OPPOSITE side
+        is the natural first target - which is far more useful than a fixed 2R
+        number plucked from nowhere.
+
+        Sessions in UTC: Asia 00:00-09:00. Returns {} when there is not enough
+        history to identify a completed session.
+        """
+        from datetime import datetime, timezone
+        if not candles_15m:
+            return {}
+        seg = candles_15m[-lookback_bars:]
+        now = datetime.fromtimestamp(seg[-1].time, tz=timezone.utc)
+        today = now.date()
+
+        asia, prev_day = [], []
+        for c in seg:
+            d = datetime.fromtimestamp(c.time, tz=timezone.utc)
+            if d.date() == today and 0 <= d.hour < 9:
+                asia.append(c)
+            if (today - d.date()).days == 1:
+                prev_day.append(c)
+
+        out = {}
+        if asia:
+            out['asiaHigh'] = round(max(c.high for c in asia), 5)
+            out['asiaLow'] = round(min(c.low for c in asia), 5)
+            out['asiaBars'] = len(asia)
+        if prev_day:
+            out['pdHigh'] = round(max(c.high for c in prev_day), 5)
+            out['pdLow'] = round(min(c.low for c in prev_day), 5)
+        return out
+
+    def sweep_of(self, candles_15m, level, direction, lookback=48, atr=None):
+        """
+        Has price TAKEN a liquidity level and then FAILED there?
+
+        direction 'above': price traded above `level` then closed back below it
+        (buy-side liquidity taken, buyers trapped). 'below' is the mirror.
+
+        This is the specific event that makes a zone reaction credible: the
+        stops above the level were collected and price could not hold there.
+        Returns {'swept': bool, 'extreme': float, 'barsAgo': int} or {}.
+        """
+        if not candles_15m or level is None:
+            return {}
+        seg = candles_15m[-lookback:]
+        n = len(seg)
+        best_i, best_v = None, None
+        for i, c in enumerate(seg):
+            if direction == 'above' and c.high > level:
+                if best_v is None or c.high > best_v:
+                    best_v, best_i = c.high, i
+            elif direction == 'below' and c.low < level:
+                if best_v is None or c.low < best_v:
+                    best_v, best_i = c.low, i
+        if best_i is None:
+            return {'swept': False}
+        last = seg[-1]
+        failed = (last.close < level) if direction == 'above' else (last.close > level)
+        return {
+            'swept': bool(failed),
+            'reached': round(best_v, 5),
+            'barsAgo': (n - 1) - best_i,
+            'level': round(level, 5),
+        }
 
     def detect_fakeouts(self, candles_15m, ob_low, ob_high, bias,
                         lookback=40, min_wick=0.10):
@@ -1116,7 +1190,9 @@ class SMCEngine:
                         holds = last.close >= ob_low
                         state = 'retest' if (in_zone and holds) else 'broken'
                         return {'state': state, 'ob_high': ob_high,
-                                'ob_low': ob_low, 'break_idx': base + break_idx}
+                                'ob_low': ob_low, 'break_idx': base + break_idx,
+                                'choch_level': round(pivot_lvl, 5),
+                                'choch_time': seg[break_idx].time}
         else:
             # bullish: find a swing high price CLOSED above = bullish break
             recent_cut = len(seg) - min(len(seg), self.mitigation_window)
@@ -1153,7 +1229,9 @@ class SMCEngine:
                         holds = last.close <= ob_high
                         state = 'retest' if (in_zone and holds) else 'broken'
                         return {'state': state, 'ob_high': ob_high,
-                                'ob_low': ob_low, 'break_idx': base + break_idx}
+                                'ob_low': ob_low, 'break_idx': base + break_idx,
+                                'choch_level': round(pivot_lvl, 5),
+                                'choch_time': seg[break_idx].time}
         return {'state': 'none'}
 
     def ob_strength(self, ob, candles, respect=None):
