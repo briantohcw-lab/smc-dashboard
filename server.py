@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "4.8"
-SERVER_DATE    = "2026-10-11"
-SERVER_NOTES   = "stale-entry guard, fake-breakout markers"
+SERVER_VERSION = "4.9"
+SERVER_DATE    = "2026-10-12"
+SERVER_NOTES   = "setup verdict + pass/fail checklist, liquidity targets"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -544,6 +544,134 @@ def _technicals(pair, c4, c15):
     return out
 
 
+def _setup_verdict(e, c4, c15):
+    """
+    Turn the raw state into a plain-language verdict plus a pass/fail checklist
+    where every item says WHY, including the ones that fail.
+
+    The old card listed only what passed, which quietly flattered every setup.
+    A reader needs the objections more than the confirmations - "only 52% deep,
+    under your 75% arm depth" is the sentence that stops a bad trade.
+    """
+    bull = e.get('bias') == 'bull'
+    lo, hi, px = e.get('obLow'), e.get('obHigh'), e.get('price')
+    checks = []
+
+    def ok(passed, text):
+        checks.append({'pass': bool(passed), 'text': text})
+
+    # 1. is price in the zone, and how deep
+    depth_pct = None
+    if lo is not None and hi is not None and hi > lo and px is not None:
+        depth_pct = ((hi - px) / (hi - lo)) if bull else ((px - lo) / (hi - lo))
+        depth_pct = max(0.0, min(1.0, depth_pct)) * 100
+    inside = bool(lo is not None and hi is not None and lo <= px <= hi)
+    ok(inside, 'Price in 4H ' + ('bullish' if bull else 'bearish') + ' OB')
+    need = engine.arm_penetration * 100
+    if depth_pct is not None:
+        ok(depth_pct >= need,
+           ('%.0f%% deep' % depth_pct) +
+           (' — at or past your %.0f%% arm depth' % need if depth_pct >= need
+            else ' — under your %.0f%% arm depth' % need))
+
+    # 2. liquidity: was a session level taken and rejected before this?
+    lv = e.get('levels') or {}
+    swp = e.get('sweep') or {}
+    if swp.get('swept'):
+        side = 'Buy-side' if bull is False else 'Sell-side'
+        ok(True, '%s swept: %s taken, failed at %s'
+           % (side, swp.get('level'), swp.get('reached')))
+    elif swp:
+        ok(False, 'No liquidity sweep before the reaction')
+
+    # 3. the 15m trigger
+    br = e.get('brState')
+    if br == 'retest':
+        ok(True, '15m broke structure' +
+           (' below %s' % e.get('chochLevel') if not bull else ' above %s' % e.get('chochLevel')
+            if e.get('chochLevel') else '') + ' and retested')
+    elif br == 'broken':
+        ok(True, '15m broke structure' +
+           (' at %s' % e.get('chochLevel') if e.get('chochLevel') else '') +
+           ' — retest not in yet')
+    else:
+        ok(False, '15m has not broken structure yet')
+
+    # 4. fake breakout of the zone edge
+    fk = e.get('fakeouts') or []
+    if fk:
+        last = fk[-1]
+        ok(True, 'Wick pierced %s by %s ATR then closed back inside'
+           % (last.get('edge'), last.get('pierceAtr')))
+
+    # 5. imbalance
+    ok(bool(e.get('fvg')),
+       'Bearish FVG supporting the move' if (not bull and e.get('fvg'))
+       else 'Bullish FVG supporting the move' if e.get('fvg')
+       else 'No clean %s FVG' % ('bearish' if not bull else 'bullish'))
+
+    # 6. reward against real liquidity, not a made-up multiple
+    tgt, tgt_name = _liquidity_target(e, lv)
+    if tgt is not None and e.get('slPrice') is not None and px:
+        risk = abs(px - e['slPrice'])
+        if risk > 0:
+            r = abs(tgt - px) / risk
+            ok(r >= 2.0, 'About %.1fR to the %s' % (r, tgt_name))
+            e['liqTarget'] = round(tgt, 5)
+            e['liqTargetName'] = tgt_name
+            e['liqTargetR'] = round(r, 1)
+
+    # 7. session quality
+    if e.get('sessionSkip'):
+        ok(False, 'Thin-liquidity session — measured a fifth of the expectancy')
+
+    passed = sum(1 for c in checks if c['pass'])
+    e['checks'] = checks
+    e['checksPassed'] = passed
+    e['checksTotal'] = len(checks)
+    e['depthPct'] = round(depth_pct) if depth_pct is not None else None
+
+    # ── the headline state
+    if e.get('entryGone'):
+        state, tone = 'Entry gone, price left the zone', 'bad'
+    elif not inside and e.get('mitigated'):
+        state, tone = 'Tapped and left, watching 15m', 'warn'
+    elif br == 'retest':
+        state, tone = 'Live, retest under way', 'good'
+    elif br == 'broken':
+        state, tone = 'Broken, waiting on the retest', 'good'
+    elif inside and depth_pct is not None and depth_pct < need:
+        state, tone = 'In zone but shallow, no trigger', 'warn'
+    elif inside:
+        state, tone = 'In zone, waiting on 15m', 'warn'
+    else:
+        state, tone = 'Not an OB reaction', 'bad'
+    e['stateLabel'] = state
+    e['stateTone'] = tone
+    return e
+
+
+def _liquidity_target(e, lv):
+    """The nearest sensible liquidity pool in the trade's direction."""
+    bull = e.get('bias') == 'bull'
+    px = e.get('price')
+    if px is None:
+        return None, None
+    cands = []
+    if bull:
+        for k, nm in (('asiaHigh', 'Asia high'), ('pdHigh', 'prior day high')):
+            if lv.get(k) and lv[k] > px:
+                cands.append((lv[k], nm))
+    else:
+        for k, nm in (('asiaLow', 'Asia low'), ('pdLow', 'prior day low')):
+            if lv.get(k) and lv[k] < px:
+                cands.append((lv[k], nm))
+    if not cands:
+        return None, None
+    cands.sort(key=lambda t: abs(t[0] - px))
+    return cands[0]
+
+
 @app.route('/analysis')
 def get_analysis():
     """
@@ -604,6 +732,28 @@ def get_analysis():
                 t['lastFakeoutBarsAgo'] = (len(seg) - 1 - fk[-1]['i']) if fk else None
         except Exception:
             t['fakeouts'] = []
+
+        # ── liquidity context: session levels, and whether one was swept ──
+        try:
+            lv = engine.session_levels(cc[1]) if cc[1] else {}
+            t['levels'] = lv
+            bull = (e.get('bias') == 'bull')
+            # a bullish reaction is credible after SELL-side liquidity is taken
+            # (stops below the low swept, sellers trapped); bearish is the mirror
+            if bull and lv.get('asiaLow') is not None:
+                t['sweep'] = engine.sweep_of(cc[1], lv['asiaLow'], 'below')
+            elif (not bull) and lv.get('asiaHigh') is not None:
+                t['sweep'] = engine.sweep_of(cc[1], lv['asiaHigh'], 'above')
+            else:
+                t['sweep'] = {}
+        except Exception:
+            t['levels'], t['sweep'] = {}, {}
+
+        t['chochLevel'] = e.get('chochLevel')
+        try:
+            _setup_verdict(t, cc[0], cc[1])
+        except Exception:
+            pass
         t.update({
             'bias': e.get('bias'),
             'price': e.get('price'),
@@ -1280,6 +1430,7 @@ def scan_once():
             'htfTrend':   'bull' if res.swing_trend == BULLISH else ('bear' if res.swing_trend == BEARISH else None),
             'barsSinceMit': res.bars_since_mit,
             'brState':    res.br_state,
+            'chochLevel': res.choch_level,
             'ltfObHigh':  res.ltf_ob_high,
             'ltfObLow':   res.ltf_ob_low,
             'receivedAt': datetime.now(timezone.utc).isoformat(),
@@ -1566,6 +1717,7 @@ def reanalyze_from_cache():
             'htfTrend':   'bull' if res.swing_trend == BULLISH else ('bear' if res.swing_trend == BEARISH else None),
             'barsSinceMit': res.bars_since_mit,
             'brState':    res.br_state,
+            'chochLevel': res.choch_level,
             'ltfObHigh':  res.ltf_ob_high,
             'ltfObLow':   res.ltf_ob_low,
             'receivedAt': datetime.now(timezone.utc).isoformat(),
