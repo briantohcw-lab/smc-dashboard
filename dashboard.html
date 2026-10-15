@@ -624,12 +624,16 @@
           <div class="cg-def">Every setup with a 15m CHoCH is checked three ways: <b>✓ 2R+</b> (the first target is at least 2× the stop away), <b>✓ breakout</b> (the CHoCH candle is a strong close through the level: body at least 0.8× the 15m ATR and at least 60% of the candle), and <b>✓ daily trend</b> (the last daily close points the same way: above the prev-day high or swept the low = up; below the low or swept the high = down).</div>
           <div class="cg-why"><b>A</b> = passes all three, <b>B</b> = two, <b>C</b> = one or none. A-grade setups sort to the top. Nothing is hidden for failing a check. These filters are still untested in your backtest, so treat the grade as a guide, not a rule.</div>
         </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">SELF-CHECK</span><div class="cg-text">
+          <div class="cg-def">Every card is checked by code before it is posted: stop and target on the correct side of the entry, price not already beyond the stop, current 15m data, OBs read from LuxAlgo, a realistic first target, and any grade mentioned in a note matching the computed grade. A card that fails shows <b style="color:var(--warn)">DATA CHECK FAILED</b> with the reason and is hidden with the invalid ones. Amber ⚠ lines are warnings (very tight stop, no target in reach) and stay on the card.</div>
+          <div class="cg-why">The header shows how long ago the scan ran. Past 60 minutes it turns amber: the levels are still right, but price has moved, so confirm on the chart.</div>
+        </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BEFORE YOU ENTER</span><div class="cg-text">
           <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check price is still holding inside or below/above the purple box.<br>2. Daily <b style="color:var(--bull)">agrees</b> = normal size. <b style="color:var(--bear)">AGAINST</b> = half size or skip.<br>3. Better with a liquidity sweep (Asian / prev-day high or low taken) and an engulfing candle at the retest.<br>4. Avoid entries from 08:00 to 15:00 SGT. Your backtest earns much less in that window.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. R:R to the first target should be at least 1.5.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">THE NUMBERS</span><div class="cg-text">
           <div class="cg-def"><b>depth %</b> = how far price got into the OB from its near edge. Deeper is better (your backtest: 75% gives 0.92R vs 0.45R at the edge). <b>Over 100%</b> means a wick went through the far edge without a close through it. The OB is still valid, but weaker.</div>
-          <div class="cg-def" style="margin-top:4px"><b>ran X pips</b> = the best move since the CHoCH printed. <b>Target</b> = the nearest liquidity at least 1R away (Asian, London or prev-day extreme, or the next opposing 4H OB). Take partial profit there and trail the rest.</div>
+          <div class="cg-def" style="margin-top:4px"><b>ran X pips</b> = the best move since the CHoCH printed. <b>Target</b> = the nearest liquidity at least 1R away: Asian, London or prev-day extreme (prev-day = the last New York-close daily candle), or the next opposing 4H OB if it is within 3× the 4H ATR. The card names which one. If nothing qualifies, there is no target and the 2R check fails. Take partial profit there and trail the rest.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">WHEN IT UPDATES</span><div class="cg-text">
           <div class="cg-def">Automatically, about an hour before each session, Mon–Fri: <b>Asian 06:55</b>, <b>London 13:54</b> (14:54 after 25 Oct), and <b>NY 19:23</b> (20:23 after 1 Nov), all SGT. TradingView must be open on your PC with the Smart Money Concepts indicator on the chart.</div>
@@ -719,7 +723,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.0";
+const DASH_VERSION = "6.1";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -1979,6 +1983,7 @@ const TV_STATUS = {
   waiting: {t:'IN OB — WAIT CHOCH',  c:'var(--warn)', rank:2},
   near:    {t:'NEAR OB',             c:'var(--text2)',rank:3},
   ran:     {t:'RAN — MISSED',        c:'var(--text3)',rank:4},
+  check:   {t:'DATA CHECK FAILED',   c:'var(--warn)', rank:4},
   failed:  {t:'CLOSED THROUGH 15M OB', c:'var(--text3)',rank:4},
   flipped: {t:'STRUCTURE FLIPPED',   c:'var(--text3)',rank:5},
   invalid: {t:'INVALIDATED',         c:'var(--text3)',rank:6}
@@ -2094,7 +2099,7 @@ function tvCard(p){
   const dp = p.dp || 5, dirTxt = h.dir > 0 ? '▲ LONG' : '▼ SHORT', dirCol = h.dir > 0 ? 'var(--bull)' : 'var(--bear)';
   const dead = (S.rank || 0) >= 4;
   let rows = '';
-  rows += '<div>4H '+(h.dir>0?'bull':'bear')+' OB <b>'+tvNum(h.lo,dp)+' – '+tvNum(h.hi,dp)+'</b>'+(h.st==='NEAR'?' · approaching':' · depth <b>'+(h.depth||0)+'%</b>')+' · 4H trend '+(p.t4>0?'up':p.t4<0?'down':'—')+'</div>';
+  rows += '<div>4H '+(h.dir>0?'bull':'bear')+' OB <b>'+tvNum(h.lo,dp)+' – '+tvNum(h.hi,dp)+'</b>'+(h.st==='NEAR'?' · approaching':(h.depth>100?' · <b>wicked through</b> the far edge (no close through)':' · depth <b>'+(h.depth||0)+'%</b>'))+' · 4H swing trend (est.) '+(p.t4>0?'up':p.t4<0?'down':'—')+'</div>';
   if(h.ch){
     rows += '<div>15m '+tvEsc(h.ch.tag)+' <b>'+tvNum(h.ch.lvl,dp)+'</b> @ '+tvTime(h.ch.t)+
       (h.ob15 ? '' : (h.retest ? ' · retest '+(h.retest.held?'<b style="color:var(--bull)">held</b>':'<b style="color:var(--bear)">failed</b>')+' '+tvTime(h.retest.t) : ' · no retest yet'))+
@@ -2107,9 +2112,11 @@ function tvCard(p){
   } else if(h.st !== 'NEAR'){
     rows += '<div>15m: no '+(h.dir>0?'bullish':'bearish')+' CHoCH since price entered the zone</div>';
   }
+  if(h.fail) rows += '<div style="color:var(--warn)">⚠ Self-check failed: <b>'+tvEsc(h.fail)+'</b>. Do not use this card - check the chart.</div>';
+  (h.warn||[]).forEach(function(w){ rows += '<div style="color:var(--warn)">⚠ '+tvEsc(w)+'</div>'; });
   rows += tvChecks(h);
   if(h.entry!=null){
-    rows += '<div class="tv-plan"><span>entry <b style="color:var(--accent)">'+tvNum(h.entry,dp)+'</b></span><span>stop <b style="color:var(--bear)">'+tvNum(h.stop,dp)+'</b></span><span>target <b style="color:var(--bull)">'+tvNum(h.target,dp)+'</b></span>'+(h.rr!=null?'<span>R:R <b>'+Number(h.rr).toFixed(1)+'</b></span>':'')+'</div>';
+    rows += '<div class="tv-plan"><span>entry <b style="color:var(--accent)">'+tvNum(h.entry,dp)+'</b></span><span>stop <b style="color:var(--bear)">'+tvNum(h.stop,dp)+'</b></span><span>target <b style="color:var(--bull)">'+tvNum(h.target,dp)+'</b>'+(h.targetSrc?' ('+tvEsc(h.targetSrc)+')':'')+'</span>'+(h.riskPips!=null?'<span>risk <b>'+h.riskPips+'</b> pips</span>':'')+(h.rr!=null?'<span>R:R <b>'+Number(h.rr).toFixed(1)+'</b></span>':'')+'</div>';
   }
   const conf = [];
   if(p.sweep) conf.push(tvEsc(p.sweep));
@@ -2125,10 +2132,10 @@ function tvCard(p){
   }
   return '<div class="tv-card'+(dead?' dead':'')+'">'+
     '<div class="tv-top">'+(h.grade?'<span title="A = passes 2R, breakout and daily trend" style="font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;border:1px solid '+TV_GRADE[h.grade].c+';color:'+TV_GRADE[h.grade].c+'">'+h.grade+'</span>':'')+'<span class="tv-pair">'+tvEsc(p.name)+'</span><span style="color:'+dirCol+';font-size:11px;font-weight:700">'+dirTxt+'</span>'+
-    '<span style="font-size:11px;color:var(--text2)">'+tvNum(p.price,dp)+'</span>'+
+    '<span style="font-size:11px;color:var(--text2)" title="price at scan time">'+tvNum(p.price,dp)+(p.priceT?' <span style="color:var(--text3)">@'+tvTime(p.priceT+900).slice(-5)+'</span>':'')+'</span>'+
     '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span></div>'+
     tvChart(p, h)+'<div class="tv-rows">'+rows+'</div>'+
-    (p.note ? '<div class="tv-note">'+tvEsc(p.note)+'</div>' : '')+'</div>';
+    (p.note ? '<div class="tv-note"><span style="color:var(--text3)">Note at scan time:</span> '+tvEsc(p.note)+'</div>' : '')+'</div>';
 }
 
 async function loadTvScan(){
@@ -2149,11 +2156,15 @@ async function loadTvScan(){
   const nA = live.filter(function(p){ return (p.hits||[]).some(function(h){ return h.grade === 'A' && (TV_STATUS[h.status]||{rank:9}).rank < 4; }); }).length;
   const shown = tvShowDead ? pairs : live;
   const ageH = scan.at ? (Date.now()/1000 - scan.at) / 3600 : null;
+  const ageMin = ageH!=null ? Math.round(ageH*60) : null;
+  const ageTxt = ageMin==null ? '' : ageMin < 60 ? ageMin+' min ago' : (ageH < 24 ? ageH.toFixed(1)+' h ago' : Math.round(ageH/24)+' days ago');
   const counts = {};
   live.forEach(function(p){ const k = (p.hits||[]).slice().sort(function(a,b){return (TV_STATUS[a.status]||{rank:9}).rank-(TV_STATUS[b.status]||{rank:9}).rank;})[0].status; counts[k] = (counts[k]||0) + 1; });
   meta.innerHTML =
     '<span><b>'+tvEsc(scan.label || 'Scan')+'</b> · '+tvTime(scan.at)+' SGT</span>'+
-    (ageH!=null && ageH > 6 ? '<span class="tv-stale">⚠ '+Math.round(ageH)+'h old</span>' : '')+
+    '<span'+(ageMin!=null && ageMin>60?' class="tv-stale"':'')+'>'+ageTxt+(ageMin!=null && ageMin>60?' — prices have moved, confirm on the chart before acting':'')+'</span>'+
+    ((scan.audit||[]).length ? '<span class="tv-stale">⚠ '+scan.audit.length+' self-check issue(s): '+tvEsc(scan.audit.join('; '))+'</span>' : '<span style="color:var(--bull)">✓ self-check passed</span>')+
+    ((scan.scanErrors||[]).length ? '<span class="tv-stale">scan errors: '+tvEsc(scan.scanErrors.join(', '))+'</span>' : '')+
     '<span><b style="color:var(--bull)">'+nA+' A-grade</b> · '+(counts.ready||0)+' ready · '+(counts.choch||0)+' wait retest · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
     (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' MISSED / INVALID</span>' : '')+
     (scan.summary ? '<span style="flex-basis:100%;color:var(--text)">'+tvEsc(scan.summary)+'</span>' : '');
