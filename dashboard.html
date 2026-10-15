@@ -636,7 +636,7 @@
           <div class="cg-def" style="margin-top:4px"><b>ran X pips</b> = the best move since the CHoCH printed. <b>Target</b> = the nearest liquidity at least 1R away: Asian, London or prev-day extreme (prev-day = the last New York-close daily candle), or the next opposing 4H OB if it is within 3× the 4H ATR. The card names which one. If nothing qualifies, there is no target and the 2R check fails. Take partial profit there and trail the rest.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">WHEN IT UPDATES</span><div class="cg-text">
-          <div class="cg-def">Automatically, about an hour before each session, Mon–Fri: <b>Asian 06:55</b>, <b>London 13:54</b> (14:54 after 25 Oct), and <b>NY 19:23</b> (20:23 after 1 Nov), all SGT. TradingView must be open on your PC with the Smart Money Concepts indicator on the chart.</div>
+          <div class="cg-def"><b>Every hour</b> (at about :03 past, Mon–Fri) the scan refreshes by itself inside TradingView, with no notes. Before each session, <b>Asian 06:55</b>, <b>London 13:54</b> (14:54 after 25 Oct) and <b>NY 19:23</b> (20:23 after 1 Nov), all SGT, Claude reviews the scan and adds notes. Those notes stay on the cards, marked with the time they were written, until the next session review. TradingView must be open on your PC with the Smart Money Concepts indicator on the chart.</div>
           <div class="cg-why">Read-only: the scan never places or changes trades.</div>
         </div></div>
       </div>
@@ -723,7 +723,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.1";
+const DASH_VERSION = "6.2";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -2135,7 +2135,7 @@ function tvCard(p){
     '<span style="font-size:11px;color:var(--text2)" title="price at scan time">'+tvNum(p.price,dp)+(p.priceT?' <span style="color:var(--text3)">@'+tvTime(p.priceT+900).slice(-5)+'</span>':'')+'</span>'+
     '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span></div>'+
     tvChart(p, h)+'<div class="tv-rows">'+rows+'</div>'+
-    (p.note ? '<div class="tv-note"><span style="color:var(--text3)">Note at scan time:</span> '+tvEsc(p.note)+'</div>' : '')+'</div>';
+    (p.note ? '<div class="tv-note"><span style="color:var(--text3)">'+(p.noteAt?'Claude note from '+tvTime(p.noteAt):'Note at scan time')+':</span> '+tvEsc(p.note)+'</div>' : '')+'</div>';
 }
 
 async function loadTvScan(){
