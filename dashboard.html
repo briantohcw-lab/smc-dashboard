@@ -614,8 +614,9 @@
           <div class="cg-why">A line with <b>↑ / ↓</b> at the edge is off the chart. The arrow shows which way it is, with its price.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BADGES → ACTION</span><div class="cg-text">
-          <div class="cg-def"><b style="color:var(--bull)">READY — 15M OB HOLDING</b>: price has come back into the purple 15m OB and has not closed through it. Enter in the box with the stop beyond the red line, ideally on a rejection or engulfing candle there.</div>
-          <div class="cg-def" style="margin-top:4px"><b style="color:#b48cff">CHOCH — WAIT FOR 15M OB</b>: structure broke, but price hasn't come back to the purple box yet. Set a TradingView alert at the blue entry line and don't chase.</div>
+          <div class="cg-def"><b style="color:var(--bull)">CONFIRMED — ENTRY VALID</b>: price came back into the purple 15m OB, and a 15m engulfing or rejection candle has <b>closed</b> back out of it (green ▲/▼ on the chart). The entry (blue) is that candle's close, with the stop beyond the red line. Check it is still within reach before entering.</div>
+          <div class="cg-def" style="margin-top:4px"><b style="color:var(--warn)">IN 15M OB — WAIT FOR CONFIRMATION</b>: price is in or has touched the box, but no confirmation candle has closed yet. Do not enter. The card says which close you are waiting for.</div>
+          <div class="cg-def" style="margin-top:4px"><b style="color:#b48cff">CHOCH — WAIT FOR 15M OB</b>: structure broke, but price hasn't come back to the purple box yet. For A/B-grade setups Claude sets a TradingView alert on the box edge at each session review, so your phone pings when price arrives.</div>
           <div class="cg-def" style="margin-top:4px"><b style="color:var(--warn)">IN OB — WAIT CHOCH</b>: price is in the zone but the 15m hasn't turned. The card note gives the 15m close that would be the trigger.</div>
           <div class="cg-def" style="margin-top:4px"><b>NEAR OB</b>: approaching the zone. Nothing to do yet.</div>
           <div class="cg-why"><b>RAN — MISSED</b>, <b>CLOSED THROUGH 15M OB</b>, flipped and invalid setups are hidden behind the toggle at the top. Don't enter those.</div>
@@ -723,7 +724,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.2";
+const DASH_VERSION = "6.3";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -1978,9 +1979,11 @@ function updateClock(){
 // /tv-scan. One card per pair: 15m candles with the 4H OB, CHoCH trigger,
 // entry / stop / target and Asian liquidity drawn on, plus the checklist.
 const TV_STATUS = {
+  confirmed:{t:'CONFIRMED — ENTRY VALID', c:'var(--bull)', rank:0},
   ready:   {t:'READY — 15M OB HOLDING', c:'var(--bull)', rank:0},
-  choch:   {t:'CHOCH — WAIT FOR 15M OB', c:'#b48cff',  rank:1},
-  waiting: {t:'IN OB — WAIT CHOCH',  c:'var(--warn)', rank:2},
+  zone:    {t:'IN 15M OB — WAIT FOR CONFIRMATION', c:'var(--warn)', rank:1},
+  choch:   {t:'CHOCH — WAIT FOR 15M OB', c:'#b48cff',  rank:2},
+  waiting: {t:'IN 4H OB — WAIT CHOCH', c:'var(--text2)', rank:3},
   near:    {t:'NEAR OB',             c:'var(--text2)',rank:3},
   ran:     {t:'RAN — MISSED',        c:'var(--text3)',rank:4},
   check:   {t:'DATA CHECK FAILED',   c:'var(--warn)', rank:4},
@@ -2075,6 +2078,14 @@ function tvChart(p, h){
     const up = o.v > hi, ty = up ? padT + 8 + 9*topN++ : H - padB - 3 - 9*botN++;
     g += '<text x="'+(W-padR-3)+'" y="'+ty+'" font-size="8" fill="'+o.col+'" text-anchor="end">'+(up?'↑ ':'↓ ')+o.lbl+' '+Number(o.v).toFixed(p.dp||5)+'</text>';
   });
+  // confirmation candle: triangle under/over it
+  if(h.rt15 && h.rt15.conf){
+    for(let i=0;i<n;i++){ if(bars[i][0]===h.rt15.conf.t){
+      const x=i*cw+cw/2, yy = h.dir<0 ? y(bars[i][2])-4 : y(bars[i][3])+4, s2=4;
+      g += h.dir<0 ? '<path d="M'+(x-s2)+' '+(yy-s2*1.6)+' L'+(x+s2)+' '+(yy-s2*1.6)+' L'+x+' '+yy+' Z" fill="var(--bull)"/>'
+                   : '<path d="M'+(x-s2)+' '+(yy+s2*1.6)+' L'+(x+s2)+' '+(yy+s2*1.6)+' L'+x+' '+yy+' Z" fill="var(--bull)"/>';
+      break; } }
+  }
   // last price tag
   const last = bars[n-1][4];
   g += '<circle cx="'+((n-1)*cw + cw/2).toFixed(1)+'" cy="'+y(last).toFixed(1)+'" r="2.2" fill="var(--text)"/>';
@@ -2107,7 +2118,9 @@ function tvCard(p){
     if(h.ob15){
       const r = h.rt15 || {};
       rows += '<div>15m OB (entry zone) <b style="color:#b48cff">'+tvNum(h.ob15.lo,dp)+' – '+tvNum(h.ob15.hi,dp)+'</b> · '+
-        (r.broke ? '<b style="color:var(--bear)">closed through it</b>' : r.t ? 'price reached it '+tvTime(r.t)+(r.inZone?' · <b style="color:var(--bull)">in zone now</b>':'') : 'not reached yet')+'</div>';
+        (r.broke ? '<b style="color:var(--bear)">closed through it</b>' : r.t ? 'price reached it '+tvTime(r.t)+(r.inZone?' · <b style="color:var(--warn)">in zone now</b>':'') : 'not reached yet')+'</div>';
+      if(r.conf) rows += '<div>Confirmation: <b style="color:var(--bull)">'+(h.dir<0?'bearish ':'bullish ')+tvEsc(r.conf.kind)+'</b> closed '+tvNum(r.conf.c,dp)+' @ '+tvTime(r.conf.t)+' (▲/▼ on chart)</div>';
+      else if(r.t && !r.broke) rows += '<div style="color:var(--warn)">No confirmation candle yet: wait for a 15m '+(h.dir<0?'bearish':'bullish')+' engulfing or rejection that closes back '+(h.dir<0?'below ':'above ')+tvNum(h.dir<0?h.ob15.lo:h.ob15.hi,dp)+'</div>';
     }
   } else if(h.st !== 'NEAR'){
     rows += '<div>15m: no '+(h.dir>0?'bullish':'bearish')+' CHoCH since price entered the zone</div>';
@@ -2165,7 +2178,7 @@ async function loadTvScan(){
     '<span'+(ageMin!=null && ageMin>60?' class="tv-stale"':'')+'>'+ageTxt+(ageMin!=null && ageMin>60?' — prices have moved, confirm on the chart before acting':'')+'</span>'+
     ((scan.audit||[]).length ? '<span class="tv-stale">⚠ '+scan.audit.length+' self-check issue(s): '+tvEsc(scan.audit.join('; '))+'</span>' : '<span style="color:var(--bull)">✓ self-check passed</span>')+
     ((scan.scanErrors||[]).length ? '<span class="tv-stale">scan errors: '+tvEsc(scan.scanErrors.join(', '))+'</span>' : '')+
-    '<span><b style="color:var(--bull)">'+nA+' A-grade</b> · '+(counts.ready||0)+' ready · '+(counts.choch||0)+' wait retest · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
+    '<span><b style="color:var(--bull)">'+nA+' A-grade</b> · '+((counts.confirmed||0)+(counts.ready||0))+' confirmed · '+(counts.zone||0)+' in zone · '+(counts.choch||0)+' wait for 15m OB · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
     (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' MISSED / INVALID</span>' : '')+
     (scan.summary ? '<span style="flex-basis:100%;color:var(--text)">'+tvEsc(scan.summary)+'</span>' : '');
   $('c-tv').textContent = String(live.length);
