@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "5.6"
+SERVER_VERSION = "5.7"
 SERVER_DATE    = "2026-10-15"
-SERVER_NOTES   = "TradingView scan panel: /tv-scan receives Asian/London/NY scans"
+SERVER_NOTES   = "TradingView scan: LuxAlgo boxes as 4H OBs, RAN-MISSED status"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'

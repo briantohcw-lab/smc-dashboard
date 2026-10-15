@@ -678,7 +678,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "5.6";
+const DASH_VERSION = "5.7";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -1937,6 +1937,7 @@ const TV_STATUS = {
   choch:   {t:'CHOCH — WAIT RETEST', c:'#b48cff',    rank:1},
   waiting: {t:'IN OB — WAIT CHOCH',  c:'var(--warn)', rank:2},
   near:    {t:'NEAR OB',             c:'var(--text2)',rank:3},
+  ran:     {t:'RAN — MISSED',        c:'var(--text3)',rank:4},
   failed:  {t:'RETEST FAILED',       c:'var(--text3)',rank:4},
   flipped: {t:'STRUCTURE FLIPPED',   c:'var(--text3)',rank:5},
   invalid: {t:'INVALIDATED',         c:'var(--text3)',rank:6}
@@ -2090,7 +2091,7 @@ async function loadTvScan(){
     '<span><b>'+tvEsc(scan.label || 'Scan')+'</b> · '+tvTime(scan.at)+' SGT</span>'+
     (ageH!=null && ageH > 6 ? '<span class="tv-stale">⚠ '+Math.round(ageH)+'h old</span>' : '')+
     '<span>'+(counts.ready||0)+' ready · '+(counts.choch||0)+' wait retest · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
-    (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' INVALID</span>' : '')+
+    (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' MISSED / INVALID</span>' : '')+
     (scan.summary ? '<span style="flex-basis:100%;color:var(--text)">'+tvEsc(scan.summary)+'</span>' : '');
   $('c-tv').textContent = String(live.length);
   grid.innerHTML = shown.length ? shown.map(tvCard).join('') : '<div class="tv-empty">Nothing live from the last scan.</div>';
