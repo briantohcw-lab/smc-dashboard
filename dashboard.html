@@ -622,7 +622,7 @@
           <div class="cg-why"><b>RAN — MISSED</b>, <b>CLOSED THROUGH 15M OB</b>, flipped and invalid setups are hidden behind the toggle at the top. Don't enter those.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">GRADE A / B / C</span><div class="cg-text">
-          <div class="cg-def">Every setup with a 15m CHoCH is checked three ways: <b>✓ 2R+</b> (the first target is at least 2× the stop away), <b>✓ breakout</b> (the CHoCH candle is a strong close through the level: body at least 0.8× the 15m ATR and at least 60% of the candle), and <b>✓ daily trend</b> (the last daily close points the same way: above the prev-day high or swept the low = up; below the low or swept the high = down).</div>
+          <div class="cg-def">The grade is the <b>daily candle</b>: <b style="color:var(--bull)">A</b> = the last daily close points the same way as the setup (closed above the prev-day high or swept the low = up; below the low or swept the high = down), <b style="color:var(--warn)">B</b> = neutral, <b>C</b> = against. Backtest on all 30 pairs, May to Oct 2026 (216 confirmed entries): daily agrees <b>+0.34R</b> a trade, against <b>-0.14R</b>, positive in both halves of the period. 2R+ and breakout candle are still shown, but only as info: in the test, setups with 2R+ to the first liquidity did worse, and the breakout candle made no clear difference.</div>
           <div class="cg-why"><b>A</b> = passes all three, <b>B</b> = two, <b>C</b> = one or none. A-grade setups sort to the top. Nothing is hidden for failing a check. These filters are still untested in your backtest, so treat the grade as a guide, not a rule.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">SELF-CHECK</span><div class="cg-text">
@@ -630,7 +630,7 @@
           <div class="cg-why">The header shows how long ago the scan ran. Past 60 minutes it turns amber: the levels are still right, but price has moved, so confirm on the chart.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BEFORE YOU ENTER</span><div class="cg-text">
-          <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check price is still holding inside or below/above the purple box.<br>2. Daily <b style="color:var(--bull)">agrees</b> = normal size. <b style="color:var(--bear)">AGAINST</b> = half size or skip.<br>3. Better with a liquidity sweep (Asian / prev-day high or low taken) and an engulfing candle at the retest.<br>4. Avoid entries from 08:00 to 15:00 SGT. Your backtest earns much less in that window.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. R:R to the first target should be at least 1.5.</div>
+          <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check price is still holding inside or below/above the purple box.<br>2. Wait for <b>CONFIRMED</b> (engulfing or rejection close back out of the purple box). Entering at the first touch tested worse in every variant.<br>3. Grade A (daily agrees) = normal size. C (daily AGAINST) = skip.<br>4. Stop goes beyond the 4H OB (the card's stop). A stop behind only the 15m box lost to spread in the backtest; it is shown greyed as "tight 15m stop" for reference.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. Expect about 4 in 10 to win. The profit comes from a few large winners, so keep risk per trade small and let the target work.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">THE NUMBERS</span><div class="cg-text">
           <div class="cg-def"><b>depth %</b> = how far price got into the OB from its near edge. Deeper is better (your backtest: 75% gives 0.92R vs 0.45R at the edge). <b>Over 100%</b> means a wick went through the far edge without a close through it. The OB is still valid, but weaker.</div>
@@ -724,7 +724,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.3";
+const DASH_VERSION = "6.4";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -2100,7 +2100,9 @@ function tvChecks(h){
   if(!h.checks) return '';
   const c = h.checks, ok = function(b){ return b ? '<b style="color:var(--bull)">✓</b>' : '<b style="color:var(--bear)">✗</b>'; };
   const brk = h.brk ? ' ('+h.brk.body+'× ATR body)' : '';
-  return '<div>'+ok(c.rr2)+' 2R+'+(h.rr!=null?' ('+Number(h.rr).toFixed(1)+'R)':'')+' · '+ok(c.brk)+' breakout'+brk+' · '+ok(c.daily)+' daily trend</div>';
+  const info = function(b){ return b ? '<span style="color:var(--text2)">✓</span>' : '<span style="color:var(--text3)">–</span>'; };
+  const dTxt = h.dAgree === 'agrees' ? 'daily agrees' : h.dAgree === 'AGAINST' ? 'daily AGAINST' : 'daily neutral';
+  return '<div>'+ok(c.daily)+' <b>'+dTxt+'</b> <span style="color:var(--text3)">(sets the grade)</span> · <span style="color:var(--text3)">info:</span> '+info(c.rr2)+' 2R+'+(h.rr!=null?' ('+Number(h.rr).toFixed(1)+'R)':'')+' · '+info(c.brk)+' breakout'+brk+'</div>';
 }
 
 function tvCard(p){
@@ -2129,7 +2131,7 @@ function tvCard(p){
   (h.warn||[]).forEach(function(w){ rows += '<div style="color:var(--warn)">⚠ '+tvEsc(w)+'</div>'; });
   rows += tvChecks(h);
   if(h.entry!=null){
-    rows += '<div class="tv-plan"><span>entry <b style="color:var(--accent)">'+tvNum(h.entry,dp)+'</b></span><span>stop <b style="color:var(--bear)">'+tvNum(h.stop,dp)+'</b></span><span>target <b style="color:var(--bull)">'+tvNum(h.target,dp)+'</b>'+(h.targetSrc?' ('+tvEsc(h.targetSrc)+')':'')+'</span>'+(h.riskPips!=null?'<span>risk <b>'+h.riskPips+'</b> pips</span>':'')+(h.rr!=null?'<span>R:R <b>'+Number(h.rr).toFixed(1)+'</b></span>':'')+'</div>';
+    rows += '<div class="tv-plan"><span>entry <b style="color:var(--accent)">'+tvNum(h.entry,dp)+'</b></span><span>stop <b style="color:var(--bear)">'+tvNum(h.stop,dp)+'</b></span><span>target <b style="color:var(--bull)">'+tvNum(h.target,dp)+'</b>'+(h.targetSrc?' ('+tvEsc(h.targetSrc)+')':'')+'</span>'+(h.riskPips!=null?'<span>risk <b>'+h.riskPips+'</b> pips</span>':'')+(h.stop15!=null&&h.stop15!==h.stop?'<span style="color:var(--text3)" title="Stop behind the 15m structure only. Backtest: loses to spread on most pairs.">tight 15m stop '+tvNum(h.stop15,dp)+'</span>':'')+(h.rr!=null?'<span>R:R <b>'+Number(h.rr).toFixed(1)+'</b></span>':'')+'</div>';
   }
   const conf = [];
   if(p.sweep) conf.push(tvEsc(p.sweep));
@@ -2144,7 +2146,7 @@ function tvCard(p){
     rows += '<div style="color:var(--text3)">also: '+hits.slice(1).map(function(x){ return (x.dir>0?'bull':'bear')+' OB '+tvNum(x.lo,dp)+'–'+tvNum(x.hi,dp)+' ('+((TV_STATUS[x.status]||{t:x.status}).t.toLowerCase())+')'; }).join('; ')+'</div>';
   }
   return '<div class="tv-card'+(dead?' dead':'')+'">'+
-    '<div class="tv-top">'+(h.grade?'<span title="A = passes 2R, breakout and daily trend" style="font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;border:1px solid '+TV_GRADE[h.grade].c+';color:'+TV_GRADE[h.grade].c+'">'+h.grade+'</span>':'')+'<span class="tv-pair">'+tvEsc(p.name)+'</span><span style="color:'+dirCol+';font-size:11px;font-weight:700">'+dirTxt+'</span>'+
+    '<div class="tv-top">'+(h.grade?'<span title="Grade = daily candle. A = daily agrees, B = neutral, C = against (backtest May-Oct 2026: A +0.34R per trade, C -0.14R)" style="font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;border:1px solid '+TV_GRADE[h.grade].c+';color:'+TV_GRADE[h.grade].c+'">'+h.grade+'</span>':'')+'<span class="tv-pair">'+tvEsc(p.name)+'</span><span style="color:'+dirCol+';font-size:11px;font-weight:700">'+dirTxt+'</span>'+
     '<span style="font-size:11px;color:var(--text2)" title="price at scan time">'+tvNum(p.price,dp)+(p.priceT?' <span style="color:var(--text3)">@'+tvTime(p.priceT+900).slice(-5)+'</span>':'')+'</span>'+
     '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span></div>'+
     tvChart(p, h)+'<div class="tv-rows">'+rows+'</div>'+
