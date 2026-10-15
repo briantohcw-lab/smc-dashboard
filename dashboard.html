@@ -598,6 +598,41 @@
 
   <section id="tvSection">
     <div class="sec-head" style="color:#b48cff"><span class="bar" style="background:#b48cff"></span>◧ TRADINGVIEW SCAN — 4H OB + 15M CHOCH / RETEST<span class="sec-count" id="c-tv">0</span></div>
+    <div class="conf-guide" id="tvGuide" style="margin:0 0 12px">
+      <div class="conf-guide-head" onclick="document.getElementById('tvGuide').classList.toggle('open')">
+        <span class="bar" style="background:#b48cff"></span>HOW TO READ THIS PANEL — TIMEFRAMES, LINES, WHAT TO DO
+        <span class="chev">&#9656;</span>
+      </div>
+      <div class="conf-guide-body">
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">TIMEFRAMES</span><div class="cg-text">
+          <div class="cg-def"><b>4H = WHERE.</b> The shaded box is the 4H order block, read straight from the LuxAlgo indicator on your TradingView chart. Price has to be in it, or have tapped it in the last 24h.</div>
+          <div class="cg-def" style="margin-top:4px"><b>15m = WHEN.</b> The candles on each card are 15-minute bars, roughly the last 14 hours, with times in SGT. This is where you wait for the CHoCH and the retest.</div>
+          <div class="cg-def" style="margin-top:4px"><b>Daily = WHICH WAY.</b> The last daily candle, closed at 05:00 SGT (the New York close). <b style="color:var(--bull)">agrees</b> means it points the same way as the trade. <b style="color:var(--bear)">AGAINST</b> means it doesn't, so use smaller size.</div>
+        </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">THE LINES</span><div class="cg-text">
+          <div class="cg-def"><b style="color:#b48cff">Purple dashed</b> = the 15m CHoCH level, which is your entry when price comes back and holds it. <b style="color:var(--bear)">Red</b> = stop (the extreme of the leg that broke). <b style="color:var(--bull)">Green</b> = first target. <b style="color:var(--warn)">Amber</b> = Asian high/low (08:00–15:00 SGT), the liquidity pool. White dot = last price.</div>
+          <div class="cg-why">A line with <b>↑ / ↓</b> at the edge is off the chart. The arrow shows which way it is, with its price.</div>
+        </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BADGES → ACTION</span><div class="cg-text">
+          <div class="cg-def"><b style="color:var(--bull)">READY — RETEST HELD</b>: the setup is complete and price is still within 1.5R of the entry. You can enter near the purple line, with the stop beyond the red one.</div>
+          <div class="cg-def" style="margin-top:4px"><b style="color:#b48cff">CHOCH — WAIT RETEST</b>: structure broke, but price hasn't come back yet. Set a TradingView alert at the purple line and don't chase.</div>
+          <div class="cg-def" style="margin-top:4px"><b style="color:var(--warn)">IN OB — WAIT CHOCH</b>: price is in the zone but the 15m hasn't turned. The card note gives the 15m close that would be the trigger.</div>
+          <div class="cg-def" style="margin-top:4px"><b>NEAR OB</b>: approaching the zone. Nothing to do yet.</div>
+          <div class="cg-why"><b>RAN — MISSED</b>, failed, flipped and invalid setups are hidden behind the toggle at the top. Don't enter those.</div>
+        </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BEFORE YOU ENTER</span><div class="cg-text">
+          <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check the purple line is still holding.<br>2. Daily <b style="color:var(--bull)">agrees</b> = normal size. <b style="color:var(--bear)">AGAINST</b> = half size or skip.<br>3. Better with a liquidity sweep (Asian / prev-day high or low taken) and an engulfing candle at the retest.<br>4. Avoid entries from 08:00 to 15:00 SGT. Your backtest earns much less in that window.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. R:R to the first target should be at least 1.5.</div>
+        </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">THE NUMBERS</span><div class="cg-text">
+          <div class="cg-def"><b>depth %</b> = how far price got into the OB from its near edge. Deeper is better (your backtest: 75% gives 0.92R vs 0.45R at the edge). <b>Over 100%</b> means a wick went through the far edge without a close through it. The OB is still valid, but weaker.</div>
+          <div class="cg-def" style="margin-top:4px"><b>ran X pips</b> = the best move since the CHoCH printed. <b>Target</b> = the nearest liquidity at least 1R away (Asian, London or prev-day extreme, or the next opposing 4H OB). Take partial profit there and trail the rest.</div>
+        </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">WHEN IT UPDATES</span><div class="cg-text">
+          <div class="cg-def">Automatically, about an hour before each session, Mon–Fri: <b>Asian 06:55</b>, <b>London 13:54</b> (14:54 after 25 Oct), and <b>NY 19:23</b> (20:23 after 1 Nov), all SGT. TradingView must be open on your PC with the Smart Money Concepts indicator on the chart.</div>
+          <div class="cg-why">Read-only: the scan never places or changes trades.</div>
+        </div></div>
+      </div>
+    </div>
     <div class="tv-meta" id="tvMeta"></div>
     <div class="tv-key">
       <span><i style="border-color:#b48cff"></i>15m CHoCH level = entry on retest</span>
@@ -678,7 +713,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "5.7";
+const DASH_VERSION = "5.8";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
