@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "5.8"
+SERVER_VERSION = "5.9"
 SERVER_DATE    = "2026-10-15"
-SERVER_NOTES   = "TradingView scan panel: how-to-read guide"
+SERVER_NOTES   = "TradingView scan: A/B/C grade (2R, breakout candle, daily trend)"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
