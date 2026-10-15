@@ -178,6 +178,26 @@ Pairs not matching TradingView
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRADINGVIEW SCAN PANEL (v5.6)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The Asian / London / NY scans run inside TradingView desktop on the PC and
+POST their results to /tv-scan. The dashboard shows them in the
+"TRADINGVIEW SCAN" section: a 15m chart per pair with the 4H OB, CHoCH level,
+stop, target and Asian high/low, plus status and the daily-close check.
+Uses zero Twelve Data credits.
+
+Setup (once):
+  Railway → Variables → add  TV_SCAN_TOKEN = <the token Claude gave you>
+  Without it every POST is refused (403) and /version shows tv_scan: false.
+
+Notes:
+  GET /tv-scan returns the latest scan as JSON.
+  Stored in /tmp like the journal, so a redeploy blanks the panel until the
+  next scan arrives. Nothing to back up: each scan replaces the last one.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FILES IN THIS FOLDER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

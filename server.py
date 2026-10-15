@@ -38,9 +38,9 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "4.9"
-SERVER_DATE    = "2026-10-12"
-SERVER_NOTES   = "setup verdict + pass/fail checklist, liquidity targets"
+SERVER_VERSION = "5.6"
+SERVER_DATE    = "2026-10-15"
+SERVER_NOTES   = "TradingView scan panel: /tv-scan receives Asian/London/NY scans"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
 PAIRS         = [p.strip() for p in os.environ.get(
                     'PAIRS', 'GBP/JPY,EUR/USD,USD/JPY,XAU/USD,GBP/USD,AUD/USD'
@@ -2183,6 +2183,7 @@ def version_info():
         'trade_journal':    True,
         'screenshot_parse': ai_on and hasattr(ai_analysis, 'parse_trade_screenshot'),
         'trend_column':     True,
+        'tv_scan':          bool(TV_SCAN_TOKEN),
     }
     return jsonify({
         'server':  {'version': SERVER_VERSION, 'date': SERVER_DATE, 'notes': SERVER_NOTES},
@@ -2453,6 +2454,61 @@ def journal_import():
         journal[:] = trades
         _save_journal()
     return jsonify({'status': 'ok', 'count': len(trades)})
+
+
+# ── TRADINGVIEW SCAN: results pushed from the TradingView desktop app ──
+# The session scans (Asian / London / NY) run inside TradingView on the PC,
+# using LuxAlgo-style 4H OBs + 15m CHoCH/retest. At the end of each scan the
+# page POSTs the result here so it shows on the dashboard next to the engine's
+# own signals. Zero Twelve Data credits.
+# Security: set TV_SCAN_TOKEN in Railway; POSTs without the same token are
+# refused. The token is sent in the JSON body (Content-Type text/plain) so the
+# browser makes a "simple" request with no CORS preflight.
+TV_SCAN_TOKEN = os.environ.get('TV_SCAN_TOKEN', '').strip()
+TV_SCAN_FILE  = os.environ.get('TV_SCAN_FILE', '/tmp/smc_tv_scan.json')
+TV_SCAN_MAX_BYTES = 3_000_000
+tv_scan = {'scan': None, 'received_at': None}
+_tv_lock = threading.Lock()
+
+
+def _load_tv_scan():
+    try:
+        with open(TV_SCAN_FILE) as f:
+            d = json.load(f)
+        if isinstance(d, dict) and 'scan' in d:
+            tv_scan.update(d)
+    except Exception:
+        pass
+
+
+@app.route('/tv-scan', methods=['GET', 'POST'])
+def tv_scan_route():
+    if request.method == 'GET':
+        with _tv_lock:
+            return jsonify(tv_scan)
+
+    if not TV_SCAN_TOKEN:
+        return jsonify({'ok': False, 'error': 'TV_SCAN_TOKEN not set in Railway'}), 403
+    if (request.content_length or 0) > TV_SCAN_MAX_BYTES:
+        return jsonify({'ok': False, 'error': 'payload too large'}), 413
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'expected a JSON object'}), 400
+    if str(body.get('token', '')) != TV_SCAN_TOKEN:
+        return jsonify({'ok': False, 'error': 'bad token'}), 403
+    scan = body.get('scan')
+    if not isinstance(scan, dict) or not isinstance(scan.get('pairs'), list):
+        return jsonify({'ok': False, 'error': 'scan.pairs missing'}), 400
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _tv_lock:
+        tv_scan.update({'scan': scan, 'received_at': now})
+        try:
+            with open(TV_SCAN_FILE, 'w') as f:
+                json.dump(tv_scan, f)
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'pairs': len(scan['pairs']), 'received_at': now})
 
 
 @app.route('/daily-sr')
@@ -2861,6 +2917,8 @@ def backtest():
     </body></html>"""
     return Response(html, mimetype='text/html')
 
+
+_load_tv_scan()
 
 # ── Start background scanner when app boots ──
 if API_KEY:
