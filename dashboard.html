@@ -378,6 +378,24 @@
   .stage-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .stage-acts input{background:var(--panel2);border:1px solid var(--border2);color:var(--text);
     border-radius:4px;padding:4px 7px;font-size:10px;font-family:inherit;width:84px}
+  /* TradingView scan panel (pushed from the desktop app each session) */
+  .tv-meta{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:10px;color:var(--text2);margin-bottom:10px}
+  .tv-meta b{color:var(--text)}
+  .tv-stale{color:var(--warn)}
+  .tv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;padding-bottom:6px}
+  .tv-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:0}
+  .tv-card.dead{opacity:.5}
+  .tv-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .tv-pair{font-weight:700;font-size:14px;letter-spacing:.04em}
+  .tv-badge{margin-left:auto;font-size:9px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;border:1px solid currentColor;white-space:nowrap}
+  .tv-card svg{display:block;width:100%;height:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px}
+  .tv-rows{margin-top:7px;font-size:11px;color:var(--text2);display:grid;gap:3px}
+  .tv-rows b{color:var(--text);font-weight:600}
+  .tv-plan{display:flex;gap:10px;flex-wrap:wrap}
+  .tv-note{margin-top:6px;font-size:11px;color:var(--text);border-left:2px solid var(--accent);padding-left:8px}
+  .tv-key{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:9px;color:var(--text3);margin:0 0 10px}
+  .tv-key i{display:inline-block;width:14px;height:0;border-top:2px dashed;vertical-align:middle;margin-right:4px}
+  .tv-empty{color:var(--text3);font-size:11px;padding:6px 0 12px}
 </style>
 </head>
 <body>
@@ -578,6 +596,19 @@
     </div>
   </div>
 
+  <section id="tvSection">
+    <div class="sec-head" style="color:#b48cff"><span class="bar" style="background:#b48cff"></span>◧ TRADINGVIEW SCAN — 4H OB + 15M CHOCH / RETEST<span class="sec-count" id="c-tv">0</span></div>
+    <div class="tv-meta" id="tvMeta"></div>
+    <div class="tv-key">
+      <span><i style="border-color:#b48cff"></i>15m CHoCH level = entry on retest</span>
+      <span><i style="border-color:var(--bear)"></i>stop</span>
+      <span><i style="border-color:var(--bull)"></i>target</span>
+      <span><i style="border-color:var(--warn)"></i>Asian high / low</span>
+      <span>shaded box = 4H order block</span>
+    </div>
+    <div class="tv-grid" id="tvGrid"></div>
+  </section>
+
   <section>
     <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▦ ALL PAIRS — CONDITION MATRIX<span class="sec-count" id="c-mx">0</span></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -647,8 +678,8 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "5.5";
-const DASH_DATE    = "2026-10-12";
+const DASH_VERSION = "5.6";
+const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
 const filters = { dir: 'all', conf: 0 };
@@ -1897,10 +1928,180 @@ function updateClock(){
   if(c) c.textContent = d.toUTCString().slice(17,25)+' UTC';
 }
 
+// ---- TRADINGVIEW SCAN panel ----
+// Filled by the session scans that run inside TradingView desktop and POST to
+// /tv-scan. One card per pair: 15m candles with the 4H OB, CHoCH trigger,
+// entry / stop / target and Asian liquidity drawn on, plus the checklist.
+const TV_STATUS = {
+  ready:   {t:'READY — RETEST HELD', c:'var(--bull)', rank:0},
+  choch:   {t:'CHOCH — WAIT RETEST', c:'#b48cff',    rank:1},
+  waiting: {t:'IN OB — WAIT CHOCH',  c:'var(--warn)', rank:2},
+  near:    {t:'NEAR OB',             c:'var(--text2)',rank:3},
+  failed:  {t:'RETEST FAILED',       c:'var(--text3)',rank:4},
+  flipped: {t:'STRUCTURE FLIPPED',   c:'var(--text3)',rank:5},
+  invalid: {t:'INVALIDATED',         c:'var(--text3)',rank:6}
+};
+let tvShowDead = false;
+
+function tvEsc(v){ return String(v==null?'':v).replace(/[&<>"]/g, function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]; }); }
+function tvNum(v, dp){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(dp); }
+function tvMove(v, dp){
+  // FX in pips; gold / BTC in price units
+  if(v==null) return '—';
+  if(dp===5) return (v/0.0001).toFixed(1)+' pips';
+  if(dp===3) return (v/0.01).toFixed(1)+' pips';
+  return Number(v).toFixed(dp);
+}
+function tvTime(t){
+  if(!t) return '';
+  return new Date(t*1000).toLocaleString('en-GB',{timeZone:'Asia/Singapore',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false}).replace(',','');
+}
+
+function tvChart(p, h){
+  const bars = p.bars || [];
+  const W = 320, H = 170, padR = 52, padT = 6, padB = 14;
+  if(bars.length < 5) return '';
+  const lv = [];
+  bars.forEach(function(b){ lv.push(b[2], b[3]); });
+  // keep the important levels on screen, but don't let a far target squash the candles
+  const lo0 = Math.min.apply(null, lv), hi0 = Math.max.apply(null, lv), span0 = hi0 - lo0;
+  const extra = [h.lo, h.hi, h.entry, h.stop, h.target, h.ch && h.ch.lvl, p.asia && p.asia[0], p.asia && p.asia[1]];
+  extra.forEach(function(v){ if(v!=null && v > lo0 - span0*0.6 && v < hi0 + span0*0.6) lv.push(v); });
+  let lo = Math.min.apply(null, lv), hi = Math.max.apply(null, lv);
+  const pad = (hi - lo) * 0.04 || hi * 0.0005; lo -= pad; hi += pad;
+  const n = bars.length, cw = (W - padR) / n;
+  const y = function(v){ return padT + (hi - v) / (hi - lo) * (H - padT - padB); };
+  const inView = function(v){ return v!=null && v >= lo && v <= hi; };
+  let g = '';
+  // 4H OB zone
+  const zTop = Math.min(hi, h.hi), zBot = Math.max(lo, h.lo);
+  if(zTop > zBot){
+    const col = h.dir > 0 ? 'var(--bull)' : 'var(--bear)';
+    g += '<rect x="0" y="'+y(zTop).toFixed(1)+'" width="'+(W-padR)+'" height="'+Math.max(1,(y(zBot)-y(zTop))).toFixed(1)+'" fill="'+col+'" fill-opacity="0.13" stroke="'+col+'" stroke-opacity="0.45" stroke-width="0.6"/>';
+  }
+  // day separators + time labels (SGT)
+  let lastDay = null;
+  bars.forEach(function(b, i){
+    const d = new Date((b[0] + 8*3600) * 1000), day = d.getUTCDate(), hr = d.getUTCHours(), mn = d.getUTCMinutes();
+    if(lastDay !== null && day !== lastDay){
+      g += '<line x1="'+(i*cw).toFixed(1)+'" x2="'+(i*cw).toFixed(1)+'" y1="'+padT+'" y2="'+(H-padB)+'" stroke="var(--border2)" stroke-dasharray="2 3"/>';
+    }
+    if(mn === 0 && hr % 4 === 0 && i > 2 && i < n - 2){
+      g += '<text x="'+(i*cw).toFixed(1)+'" y="'+(H-3)+'" font-size="8" fill="var(--text3)" text-anchor="middle">'+String(hr).padStart(2,'0')+':00</text>';
+    }
+    lastDay = day;
+  });
+  // candles
+  bars.forEach(function(b, i){
+    const up = b[4] >= b[1], col = up ? 'var(--bull)' : 'var(--bear)', x = i*cw + cw/2;
+    g += '<line x1="'+x.toFixed(1)+'" x2="'+x.toFixed(1)+'" y1="'+y(b[2]).toFixed(1)+'" y2="'+y(b[3]).toFixed(1)+'" stroke="'+col+'" stroke-width="0.8"/>';
+    const t = y(Math.max(b[1], b[4])), bt = y(Math.min(b[1], b[4]));
+    g += '<rect x="'+(i*cw + cw*0.18).toFixed(1)+'" y="'+t.toFixed(1)+'" width="'+(cw*0.64).toFixed(1)+'" height="'+Math.max(0.8, bt - t).toFixed(1)+'" fill="'+col+'"/>';
+  });
+  // levels with right-edge labels; nudge labels apart so they stay readable
+  const lines = [];
+  const add = function(v, col, dash, lbl, w){ if(inView(v)) lines.push({v:v, col:col, dash:dash, lbl:lbl, w:w||1}); };
+  if(p.asia){ add(p.asia[1], 'var(--warn)', '2 3', 'Asia H'); add(p.asia[0], 'var(--warn)', '2 3', 'Asia L'); }
+  if(h.ch) add(h.ch.lvl, '#b48cff', '4 3', h.entry!=null && Math.abs(h.entry - h.ch.lvl) < 1e-9 ? 'entry' : 'trigger', 1.2);
+  if(h.entry!=null && !(h.ch && Math.abs(h.entry - h.ch.lvl) < 1e-9)) add(h.entry, 'var(--accent)', '', 'entry', 1.2);
+  add(h.stop, 'var(--bear)', '4 3', 'stop', 1.1);
+  add(h.target, 'var(--bull)', '4 3', 'target', 1.1);
+  lines.sort(function(a, b){ return a.v - b.v; });
+  let prevY = 1e9;
+  lines.forEach(function(L){
+    const ly = y(L.v);
+    g += '<line x1="0" x2="'+(W-padR)+'" y1="'+ly.toFixed(1)+'" y2="'+ly.toFixed(1)+'" stroke="'+L.col+'" stroke-width="'+L.w+'"'+(L.dash?' stroke-dasharray="'+L.dash+'"':'')+'/>';
+    let ty = ly + 3; if(ty > prevY - 9) ty = prevY - 9; prevY = ty;
+    g += '<text x="'+(W-padR+3)+'" y="'+ty.toFixed(1)+'" font-size="8" fill="'+L.col+'">'+L.lbl+'</text>';
+  });
+  // levels that fall off the chart: arrow at the edge so you know which way they are
+  const off = [];
+  if(h.target!=null && !inView(h.target)) off.push({v:h.target, lbl:'target', col:'var(--bull)'});
+  if(h.stop!=null && !inView(h.stop)) off.push({v:h.stop, lbl:'stop', col:'var(--bear)'});
+  let topN = 0, botN = 0;
+  off.forEach(function(o){
+    const up = o.v > hi, ty = up ? padT + 8 + 9*topN++ : H - padB - 3 - 9*botN++;
+    g += '<text x="'+(W-padR-3)+'" y="'+ty+'" font-size="8" fill="'+o.col+'" text-anchor="end">'+(up?'↑ ':'↓ ')+o.lbl+' '+Number(o.v).toFixed(p.dp||5)+'</text>';
+  });
+  // last price tag
+  const last = bars[n-1][4];
+  g += '<circle cx="'+((n-1)*cw + cw/2).toFixed(1)+'" cy="'+y(last).toFixed(1)+'" r="2.2" fill="var(--text)"/>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+tvEsc(p.name)+' 15 minute chart">'+g+'</svg>';
+}
+
+function tvCard(p){
+  const hits = (p.hits || []).slice().sort(function(a, b){ return (TV_STATUS[a.status]||{rank:9}).rank - (TV_STATUS[b.status]||{rank:9}).rank; });
+  const h = hits[0]; if(!h) return '';
+  const S = TV_STATUS[h.status] || {t:h.status, c:'var(--text2)'};
+  const dp = p.dp || 5, dirTxt = h.dir > 0 ? '▲ LONG' : '▼ SHORT', dirCol = h.dir > 0 ? 'var(--bull)' : 'var(--bear)';
+  const dead = (S.rank || 0) >= 4;
+  let rows = '';
+  rows += '<div>4H '+(h.dir>0?'bull':'bear')+' OB <b>'+tvNum(h.lo,dp)+' – '+tvNum(h.hi,dp)+'</b>'+(h.st==='NEAR'?' · approaching':' · depth <b>'+(h.depth||0)+'%</b>')+' · 4H trend '+(p.t4>0?'up':p.t4<0?'down':'—')+'</div>';
+  if(h.ch){
+    rows += '<div>15m '+tvEsc(h.ch.tag)+' <b>'+tvNum(h.ch.lvl,dp)+'</b> @ '+tvTime(h.ch.t)+
+      (h.retest ? ' · retest '+(h.retest.held?'<b style="color:var(--bull)">held</b>':'<b style="color:var(--bear)">failed</b>')+' '+tvTime(h.retest.t) : ' · no retest yet')+
+      (h.mfe!=null ? ' · ran '+tvMove(h.mfe,dp)+' from level' : '')+'</div>';
+  } else if(h.st !== 'NEAR'){
+    rows += '<div>15m: no '+(h.dir>0?'bullish':'bearish')+' CHoCH since price entered the zone</div>';
+  }
+  if(h.entry!=null){
+    rows += '<div class="tv-plan"><span>entry <b style="color:var(--accent)">'+tvNum(h.entry,dp)+'</b></span><span>stop <b style="color:var(--bear)">'+tvNum(h.stop,dp)+'</b></span><span>target <b style="color:var(--bull)">'+tvNum(h.target,dp)+'</b></span>'+(h.rr!=null?'<span>R:R <b>'+Number(h.rr).toFixed(1)+'</b></span>':'')+'</div>';
+  }
+  const conf = [];
+  if(p.sweep) conf.push(tvEsc(p.sweep));
+  (p.hs || []).forEach(function(x){ conf.push(tvEsc(x)); });
+  (p.eng || []).forEach(function(e){ if(e.d === h.dir) conf.push((e.d>0?'bull':'bear')+' engulfing '+tvTime(e.t)); });
+  if(conf.length) rows += '<div>Confluence: <b>'+conf.join(' · ')+'</b></div>';
+  if(p.daily){
+    const ag = h.dAgree, agCol = ag==='agrees' ? 'var(--bull)' : ag==='AGAINST' ? 'var(--bear)' : 'var(--text2)';
+    rows += '<div>Daily: '+tvEsc(p.daily.rel)+(h.dOB?' · '+tvEsc(h.dOB):'')+(ag?' · <b style="color:'+agCol+'">'+tvEsc(ag)+'</b>':'')+'</div>';
+  }
+  if(hits.length > 1){
+    rows += '<div style="color:var(--text3)">also: '+hits.slice(1).map(function(x){ return (x.dir>0?'bull':'bear')+' OB '+tvNum(x.lo,dp)+'–'+tvNum(x.hi,dp)+' ('+((TV_STATUS[x.status]||{t:x.status}).t.toLowerCase())+')'; }).join('; ')+'</div>';
+  }
+  return '<div class="tv-card'+(dead?' dead':'')+'">'+
+    '<div class="tv-top"><span class="tv-pair">'+tvEsc(p.name)+'</span><span style="color:'+dirCol+';font-size:11px;font-weight:700">'+dirTxt+'</span>'+
+    '<span style="font-size:11px;color:var(--text2)">'+tvNum(p.price,dp)+'</span>'+
+    '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span></div>'+
+    tvChart(p, h)+'<div class="tv-rows">'+rows+'</div>'+
+    (p.note ? '<div class="tv-note">'+tvEsc(p.note)+'</div>' : '')+'</div>';
+}
+
+async function loadTvScan(){
+  const grid = $('tvGrid'), meta = $('tvMeta');
+  if(!grid) return;
+  const d = await getJSON('/tv-scan');
+  const scan = d && d.scan;
+  if(!scan){
+    grid.innerHTML = '<div class="tv-empty">No TradingView scan received yet. Scans arrive automatically about an hour before the Asian, London and NY sessions while TradingView is open on the PC.</div>';
+    meta.innerHTML = ''; $('c-tv').textContent = '0';
+    return;
+  }
+  const pairs = (scan.pairs || []).slice();
+  const best = function(p){ let r = 9; (p.hits||[]).forEach(function(h){ r = Math.min(r, (TV_STATUS[h.status]||{rank:9}).rank); }); return r; };
+  pairs.sort(function(a, b){ return best(a) - best(b); });
+  const live = pairs.filter(function(p){ return best(p) < 4; });
+  const dead = pairs.filter(function(p){ return best(p) >= 4; });
+  const shown = tvShowDead ? pairs : live;
+  const ageH = scan.at ? (Date.now()/1000 - scan.at) / 3600 : null;
+  const counts = {};
+  live.forEach(function(p){ const k = (p.hits||[]).slice().sort(function(a,b){return (TV_STATUS[a.status]||{rank:9}).rank-(TV_STATUS[b.status]||{rank:9}).rank;})[0].status; counts[k] = (counts[k]||0) + 1; });
+  meta.innerHTML =
+    '<span><b>'+tvEsc(scan.label || 'Scan')+'</b> · '+tvTime(scan.at)+' SGT</span>'+
+    (ageH!=null && ageH > 6 ? '<span class="tv-stale">⚠ '+Math.round(ageH)+'h old</span>' : '')+
+    '<span>'+(counts.ready||0)+' ready · '+(counts.choch||0)+' wait retest · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
+    (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' INVALID</span>' : '')+
+    (scan.summary ? '<span style="flex-basis:100%;color:var(--text)">'+tvEsc(scan.summary)+'</span>' : '');
+  $('c-tv').textContent = String(live.length);
+  grid.innerHTML = shown.length ? shown.map(tvCard).join('') : '<div class="tv-empty">Nothing live from the last scan.</div>';
+  const tg = $('tvDeadToggle');
+  if(tg) tg.onclick = function(e){ e.stopPropagation(); tvShowDead = !tvShowDead; loadTvScan(); };
+}
+
 async function refreshAll(){
   updateClock();
   updateSessions();
-  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadMatrix(), loadAnalysis() ]);
+  await Promise.allSettled([ loadVersions(), loadStatus(), loadSignals(), loadArmed(), loadTracker(), loadWatch(), loadHistory(), loadMatrix(), loadAnalysis(), loadTvScan() ]);
   // AOI, Daily S/R and Trade Journal panels were removed - their loaders are
   // no longer polled so the dashboard stops making requests nothing displays.
 }
