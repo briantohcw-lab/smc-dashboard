@@ -38,7 +38,7 @@ CORS(app)
 # ── VERSION ──────────────────────────────────────────────────────────
 # Bump MINOR for behaviour changes, MAJOR for redesigns. /version reports
 # every component together so you can confirm exactly what is deployed.
-SERVER_VERSION = "6.4"
+SERVER_VERSION = "6.5"
 SERVER_DATE    = "2026-10-15"
 SERVER_NOTES   = "TradingView scan: confirmation-candle stage"
 API_KEY       = os.environ.get('TWELVE_DATA_KEY', '')
