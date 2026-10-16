@@ -621,6 +621,7 @@
           <div class="cg-def" style="margin-top:4px"><b>NEAR OB</b>: approaching the zone. Nothing to do yet.</div>
           <div class="cg-why"><b>RAN — MISSED</b>, <b>CLOSED THROUGH 15M OB</b>, flipped and invalid setups are hidden behind the toggle at the top. Don't enter those.</div>
         </div></div>
+        <div class="cg-item"><span class="cg-chip" style="color:var(--bull);border-color:var(--bull)">OB RESPECT ★★</span><div class="cg-text"><div class="cg-def">How many earlier visits this 4H OB already held: price came into it, then left by at least half a 4H ATR, without a wick through the far edge. ☆ = first visit, ★ = held once, ★★ = held twice or more (<b>respected</b>). Backtest May to Oct 2026, confirmed entries: fresh OB about 0R a trade, 2nd visit about 0R, <b>3rd+ visit +0.33R</b> (89 trades, positive in both halves). Best combined with daily agrees. Cards with ★★ sort first within the same status and grade.</div></div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">GRADE A / B / C</span><div class="cg-text">
           <div class="cg-def">The grade is the <b>daily candle</b>: <b style="color:var(--bull)">A</b> = the last daily close points the same way as the setup (closed above the prev-day high or swept the low = up; below the low or swept the high = down), <b style="color:var(--warn)">B</b> = neutral, <b>C</b> = against. Backtest on all 30 pairs, May to Oct 2026 (216 confirmed entries): daily agrees <b>+0.34R</b> a trade, against <b>-0.14R</b>, positive in both halves of the period. 2R+ and breakout candle are still shown, but only as info: in the test, setups with 2R+ to the first liquidity did worse, and the breakout candle made no clear difference.</div>
           <div class="cg-why"><b>A</b> = passes all three, <b>B</b> = two, <b>C</b> = one or none. A-grade setups sort to the top. Nothing is hidden for failing a check. These filters are still untested in your backtest, so treat the grade as a guide, not a rule.</div>
@@ -724,7 +725,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.5";
+const DASH_VERSION = "6.6";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -2095,7 +2096,15 @@ function tvChart(p, h){
 
 // sort key: status first, then grade (A before B before C)
 const TV_GRADE = {A:{v:0,c:'var(--bull)'}, B:{v:1,c:'var(--warn)'}, C:{v:2,c:'var(--text3)'}};
-function tvKey(h){ return (TV_STATUS[h.status]||{rank:9}).rank*10 + (h.grade ? TV_GRADE[h.grade].v : 3); }
+function tvKey(h){ return (TV_STATUS[h.status]||{rank:9}).rank*10 + (h.grade ? TV_GRADE[h.grade].v : 3) - (h.held>=2 ? 0.5 : 0); }
+// OB respect = how many earlier visits this 4H OB has already held (price touched it, then left by 0.5x 4H ATR).
+// Backtest May-Oct 2026: 3rd+ visit (held 2x) +0.33R a trade vs about 0 on a fresh OB.
+function tvRespect(h){
+  if(h.held==null) return '';
+  const n = h.held, strong = n >= 2;
+  const txt = n === 0 ? 'first visit (fresh OB)' : 'held '+n+'× before'+(strong ? ' — <b style="color:var(--bull)">respected</b>' : '');
+  return '<div title="Earlier visits this 4H OB held. Backtest: OBs that held twice before returned +0.33R a trade vs about 0 for a fresh OB.">OB respect '+(strong?'<b style="color:var(--bull)">★★</b>':n===1?'★':'☆')+' '+txt+'</div>';
+}
 
 function tvChecks(h){
   if(!h.checks) return '';
@@ -2113,7 +2122,7 @@ function tvCard(p){
   const dp = p.dp || 5, dirTxt = h.dir > 0 ? '▲ LONG' : '▼ SHORT', dirCol = h.dir > 0 ? 'var(--bull)' : 'var(--bear)';
   const dead = (S.rank || 0) >= 4;
   let rows = '';
-  rows += '<div>4H '+(h.dir>0?'bull':'bear')+' OB <b>'+tvNum(h.lo,dp)+' – '+tvNum(h.hi,dp)+'</b>'+(h.st==='NEAR'?' · approaching':(h.depth>100?' · <b>wicked through</b> the far edge (no close through)':' · depth <b>'+(h.depth||0)+'%</b>'))+' · 4H swing trend (est.) '+(p.t4>0?'up':p.t4<0?'down':'—')+'</div>';
+  rows += '<div>4H '+(h.dir>0?'bull':'bear')+' OB <b>'+tvNum(h.lo,dp)+' – '+tvNum(h.hi,dp)+'</b>'+(h.st==='NEAR'?' · approaching':(h.depth>100?' · <b>wicked through</b> the far edge (no close through)':' · depth <b>'+(h.depth||0)+'%</b>'))+' · 4H swing trend (est.) '+(p.t4>0?'up':p.t4<0?'down':'—')+'</div>'+tvRespect(h);
   if(h.ch){
     rows += '<div>15m '+tvEsc(h.ch.tag)+' <b>'+tvNum(h.ch.lvl,dp)+'</b> @ '+tvTime(h.ch.t)+
       (h.ob15 ? '' : (h.retest ? ' · retest '+(h.retest.held?'<b style="color:var(--bull)">held</b>':'<b style="color:var(--bear)">failed</b>')+' '+tvTime(h.retest.t) : ' · no retest yet'))+
