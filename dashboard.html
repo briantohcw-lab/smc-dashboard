@@ -630,7 +630,7 @@
           <div class="cg-why">The header shows how long ago the scan ran. Past 60 minutes it turns amber: the levels are still right, but price has moved, so confirm on the chart.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">BEFORE YOU ENTER</span><div class="cg-text">
-          <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check price is still holding inside or below/above the purple box.<br>2. Wait for <b>CONFIRMED</b> (engulfing or rejection close back out of the purple box). Entering at the first touch tested worse in every variant.<br>3. Grade A (daily agrees) = normal size. C (daily AGAINST) = skip.<br>4. Stop goes beyond the 4H OB (the card's stop). A stop behind only the 15m box lost to spread in the backtest; it is shown greyed as "tight 15m stop" for reference.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. Expect about 4 in 10 to win. The profit comes from a few large winners, so keep risk per trade small and let the target work.</div>
+          <div class="cg-def">1. Open the pair in TradingView. The card is a snapshot from scan time, so check price is still holding inside or below/above the purple box.<br>2. Wait for <b>CONFIRMED</b> (engulfing or rejection close back out of the purple box). Entering at the first touch tested worse in every variant.<br>3. Grade A (daily agrees) = normal size. Daily AGAINST setups are moved out of the live list and marked <b style="color:var(--bear)">SKIP</b>.<br>4. Stop goes beyond the 4H OB (the card's stop). A stop behind only the 15m box lost to spread in the backtest; it is shown greyed as "tight 15m stop" for reference.<br>5. No high-impact news in the next 30 minutes (US data is usually 20:30 SGT).<br>6. Expect about 4 in 10 to win. The profit comes from a few large winners, so keep risk per trade small and let the target work.</div>
         </div></div>
         <div class="cg-item"><span class="cg-chip" style="color:#b48cff;border-color:#b48cff">THE NUMBERS</span><div class="cg-text">
           <div class="cg-def"><b>depth %</b> = how far price got into the OB from its near edge. Deeper is better (your backtest: 75% gives 0.92R vs 0.45R at the edge). <b>Over 100%</b> means a wick went through the far edge without a close through it. The OB is still valid, but weaker.</div>
@@ -724,7 +724,7 @@
 const API = "";
 // ── VERSION ── bump when this file changes; shown in the header and
 // cross-checked against the server so a half-finished deploy is obvious.
-const DASH_VERSION = "6.4";
+const DASH_VERSION = "6.5";
 const DASH_DATE    = "2026-10-15";
 
 // ---- interactive state ----
@@ -1985,6 +1985,7 @@ const TV_STATUS = {
   choch:   {t:'CHOCH — WAIT FOR 15M OB', c:'#b48cff',  rank:2},
   waiting: {t:'IN 4H OB — WAIT CHOCH', c:'var(--text2)', rank:3},
   near:    {t:'NEAR OB',             c:'var(--text2)',rank:3},
+  skip:    {t:'SKIP — DAILY AGAINST', c:'var(--bear)', rank:4},
   ran:     {t:'RAN — MISSED',        c:'var(--text3)',rank:4},
   check:   {t:'DATA CHECK FAILED',   c:'var(--warn)', rank:4},
   failed:  {t:'CLOSED THROUGH 15M OB', c:'var(--text3)',rank:4},
@@ -2181,7 +2182,7 @@ async function loadTvScan(){
     ((scan.audit||[]).length ? '<span class="tv-stale">⚠ '+scan.audit.length+' self-check issue(s): '+tvEsc(scan.audit.join('; '))+'</span>' : '<span style="color:var(--bull)">✓ self-check passed</span>')+
     ((scan.scanErrors||[]).length ? '<span class="tv-stale">scan errors: '+tvEsc(scan.scanErrors.join(', '))+'</span>' : '')+
     '<span><b style="color:var(--bull)">'+nA+' A-grade</b> · '+((counts.confirmed||0)+(counts.ready||0))+' confirmed · '+(counts.zone||0)+' in zone · '+(counts.choch||0)+' wait for 15m OB · '+(counts.waiting||0)+' wait CHoCH · '+(counts.near||0)+' near</span>'+
-    (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' MISSED / INVALID</span>' : '')+
+    (dead.length ? '<span class="mx-only" id="tvDeadToggle" style="cursor:pointer">'+(tvShowDead?'HIDE':'SHOW')+' '+dead.length+' SKIPPED / MISSED / INVALID</span>' : '')+
     (scan.summary ? '<span style="flex-basis:100%;color:var(--text)">'+tvEsc(scan.summary)+'</span>' : '');
   $('c-tv').textContent = String(live.length);
   grid.innerHTML = shown.length ? shown.map(tvCard).join('') : '<div class="tv-empty">Nothing live from the last scan.</div>';
