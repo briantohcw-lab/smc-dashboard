@@ -19,14 +19,22 @@
 //|     extreme, or next opposing 4H OB within 3 x 4H ATR)            |
 //+------------------------------------------------------------------+
 #property copyright "Brian Toh / built with Claude"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
+
+enum ENUM_LOT_MODE
+  {
+   LOT_RISK  = 0,   // Risk % of equity (lot size from the stop distance)
+   LOT_FIXED = 1    // Fixed lot size
+  };
 
 //---- inputs
 input string InpSymbols      = "AUDCAD,AUDCHF,AUDJPY,AUDNZD,AUDUSD,CADCHF,CADJPY,CHFJPY,EURAUD,EURCAD,EURCHF,EURGBP,EURJPY,EURNZD,EURUSD,GBPAUD,GBPCAD,GBPCHF,GBPJPY,GBPNZD,GBPUSD,NZDCAD,NZDCHF,NZDJPY,NZDUSD,USDCAD,USDCHF,USDJPY,XAUUSD"; // Symbols (broker suffix is found automatically)
 input int    InpScanSeconds  = 60;      // Rescan every N seconds
 input int    InpGMTOffset    = -99;     // Broker GMT offset in hours (-99 = auto)
-input double InpRiskPercent  = 0.5;     // Risk % per trade for the lot-size column
+input ENUM_LOT_MODE InpLotMode = LOT_RISK; // Lot size mode
+input double InpRiskPercent  = 0.5;     // Risk % per trade (lot mode = Risk %)
+input double InpFixedLots    = 0.01;    // Fixed lots per trade (lot mode = Fixed)
 input bool   InpAlertsA      = true;    // Alert on A-grade setups
 input bool   InpAlertsB      = false;   // Alert on B-grade setups
 input bool   InpPush         = true;    // Send push notification to the MT4 phone app
@@ -47,10 +55,11 @@ input bool   InpOnePerCcy     = true;    // Never two open trades sharing a curr
 input double InpMaxSpreadR    = 0.15;    // Skip if spread > this fraction of the stop distance
 input double InpMaxSlipR      = 0.25;    // Skip if price moved more than this many R past the confirmation close
 input int    InpMaxHoldHours  = 120;     // Close after N hours (backtest: 5 days)
+input bool   InpPropGuards    = true;    // Prop-firm guards ON (daily stop, max drawdown, profit target). OFF on your own broker
 input double InpAccountSize   = 100000;  // Challenge starting balance
-input double InpDailyStopPct  = 3.0;     // Stop for the day at -N% from the day's start (FTMO limit is 5)
-input double InpMaxDDStopPct  = 8.0;     // Stop for good at -N% from the starting balance (FTMO limit is 10)
-input double InpTargetPct     = 10.0;    // Stop opening trades once equity is +N% (Phase 1 = 10, Phase 2 = 5)
+input double InpDailyStopPct  = 3.0;     // Stop for the day at -N% from the day's start (0 = off; FTMO limit is 5)
+input double InpMaxDDStopPct  = 8.0;     // Stop for good at -N% from the starting balance (0 = off; FTMO limit is 10)
+input double InpTargetPct     = 10.0;    // Stop opening trades once equity is +N% (0 = off; Phase 1 = 10, Phase 2 = 5)
 input int    InpSlippage      = 3;       // Max slippage in pips
 
 //---- status codes (lower = more actionable)
@@ -118,6 +127,7 @@ struct Setup
    double   rr;
    double   riskPips;
    double   lots;
+   double   riskMoney;
    double   price;
    string   next;
    string   confKind;
@@ -384,7 +394,7 @@ void ScanSymbol(string sym)
    Setup best;
    best.sym = sym; best.status = ST_NONE; best.grade = ""; best.held = 0; best.next = ""; best.dp = (int)MarketInfo(sym, MODE_DIGITS);
    best.d = 0; best.st4 = ""; best.depth = 0; best.daily = ""; best.hasOb15 = false; best.entry = 0; best.stop = 0; best.stop15 = 0;
-   best.target = 0; best.tgtSrc = ""; best.rr = 0; best.riskPips = 0; best.lots = 0; best.price = 0; best.confKind = ""; best.chLvl = 0;
+   best.target = 0; best.tgtSrc = ""; best.rr = 0; best.riskPips = 0; best.lots = 0; best.riskMoney = 0; best.price = 0; best.confKind = ""; best.chLvl = 0;
    best.zHi = 0; best.zLo = 0; best.swing = false; best.obHi = 0; best.obLo = 0; best.zT = 0; best.chT = 0; best.obT = 0; best.confT = 0;
 
    double O4[], H4[], L4[], C4[]; datetime T4[];
@@ -605,10 +615,15 @@ void EvaluateLTF(Setup &x, datetime entT, Ev &e1[], const double &H[], const dou
    double step = MarketInfo(x.sym, MODE_LOTSTEP), mn = MarketInfo(x.sym, MODE_MINLOT), mx = MarketInfo(x.sym, MODE_MAXLOT);
    if(tv > 0 && ts > 0 && risk > 0 && step > 0)
      {
-      double money = AccountEquity() * InpRiskPercent / 100.0;
-      double lots = money / (risk / ts * tv);
-      lots = MathFloor(lots / step) * step;
-      x.lots = MathMax(mn, MathMin(mx, lots));
+      if(InpLotMode == LOT_FIXED) x.lots = MathMax(mn, MathMin(mx, MathFloor(InpFixedLots / step + 1e-9) * step));
+      else
+        {
+         double money = AccountEquity() * InpRiskPercent / 100.0;
+         double lots = money / (risk / ts * tv);
+         lots = MathFloor(lots / step) * step;
+         x.lots = MathMax(mn, MathMin(mx, lots));
+        }
+      x.riskMoney = x.lots * risk / ts * tv;
      }
 
    string zone = DoubleToString(MathMin(obLo, obHi), x.dp) + "-" + DoubleToString(MathMax(obLo, obHi), x.dp);
@@ -705,27 +720,28 @@ void GuardEquity()
       g_haltDay = false;
      }
    double eq = AccountEquity();
-   if(!g_haltDay && g_dayStartEq > 0 && eq <= g_dayStartEq * (1 - InpDailyStopPct / 100.0))
+   if(InpPropGuards && InpDailyStopPct > 0 && !g_haltDay && g_dayStartEq > 0 && eq <= g_dayStartEq * (1 - InpDailyStopPct / 100.0))
      {
       g_haltDay = true;
       CloseAll(StringFormat("daily stop %.1f%% hit", InpDailyStopPct));
       Notify(StringFormat("SMC: daily stop -%.1f%% hit. No more trades today.", InpDailyStopPct));
      }
-   if(!g_haltAll && eq <= InpAccountSize * (1 - InpMaxDDStopPct / 100.0))
+   if(InpPropGuards && InpMaxDDStopPct > 0 && !g_haltAll && eq <= InpAccountSize * (1 - InpMaxDDStopPct / 100.0))
      {
       g_haltAll = true;
       CloseAll(StringFormat("max drawdown stop %.1f%% hit", InpMaxDDStopPct));
       Notify(StringFormat("SMC: max drawdown stop -%.1f%% hit. Trading stopped. Review before restarting.", InpMaxDDStopPct));
      }
-   if(!g_targetHit && eq >= InpAccountSize * (1 + InpTargetPct / 100.0))
+   if(InpPropGuards && InpTargetPct > 0 && !g_targetHit && eq >= InpAccountSize * (1 + InpTargetPct / 100.0))
      {
       g_targetHit = true;
       Notify(StringFormat("SMC: profit target +%.1f%% reached. No new trades; open trades run to their stop/target.", InpTargetPct));
      }
-   g_guardMsg = StringFormat("day %.2f%%  total %.2f%%%s%s%s",
+   g_guardMsg = InpPropGuards ? StringFormat("day %.2f%%  total %.2f%%%s%s%s",
                              g_dayStartEq > 0 ? 100.0 * (eq / g_dayStartEq - 1) : 0,
                              100.0 * (eq / InpAccountSize - 1),
-                             g_haltDay ? "  DAY STOP" : "", g_haltAll ? "  HALTED" : "", g_targetHit ? "  TARGET HIT" : "");
+                             g_haltDay ? "  DAY STOP" : "", g_haltAll ? "  HALTED" : "", g_targetHit ? "  TARGET HIT" : "")
+                             : StringFormat("day %.2f%%  (prop guards OFF)", g_dayStartEq > 0 ? 100.0 * (eq / g_dayStartEq - 1) : 0);
   }
 
 void Notify(string msg)
@@ -783,10 +799,15 @@ bool PlaceTrade(Setup &x)
    double tv = MarketInfo(x.sym, MODE_TICKVALUE), ts = MarketInfo(x.sym, MODE_TICKSIZE);
    double step = MarketInfo(x.sym, MODE_LOTSTEP), mn = MarketInfo(x.sym, MODE_MINLOT), mx = MarketInfo(x.sym, MODE_MAXLOT);
    if(tv <= 0 || ts <= 0 || step <= 0) return(false);
-   double money = AccountEquity() * InpRiskPercent / 100.0;
-   double lots = MathFloor(money / (risk / ts * tv) / step) * step;
-   if(lots < mn) { Print("SMC skip ", x.sym, ": lot size below broker minimum"); return(false); }
-   lots = MathMin(mx, lots);
+   double lots;
+   if(InpLotMode == LOT_FIXED) lots = MathMax(mn, MathMin(mx, MathFloor(InpFixedLots / step + 1e-9) * step));
+   else
+     {
+      double money = AccountEquity() * InpRiskPercent / 100.0;
+      lots = MathFloor(money / (risk / ts * tv) / step) * step;
+      if(lots < mn) { Print("SMC skip ", x.sym, ": lot size below broker minimum"); return(false); }
+      lots = MathMin(mx, lots);
+     }
    int dg = (int)MarketInfo(x.sym, MODE_DIGITS);
    double sl = NormalizeDouble(x.stop, dg);
    double tp = (x.target > 0) ? NormalizeDouble(x.target, dg) : 0;
@@ -907,8 +928,10 @@ void DrawPanel()
 
    Label(PFX + "Htitle", x0, y, StringFormat("SMC 4H/15m  |  %d A-grade live  |  %d confirmed  |  %d in 15m OB  |  GMT%+d  |  %s", nA, nConf, nZone, g_gmt, TimeToString(TimeLocal(), TIME_MINUTES)), clrWhite, fs + 1);
    y += rowH;
-   Label(PFX + "Hacct", x0, y, StringFormat("AUTO-TRADE %s  |  risk %.2f%%  |  open %d/%d  |  %s  |  stops: day -%.1f%%, total -%.1f%%, target +%.1f%%",
-                                            InpAutoTrade ? "ON" : "OFF", InpRiskPercent, OpenCount(), InpMaxOpen, g_guardMsg, InpDailyStopPct, InpMaxDDStopPct, InpTargetPct),
+   string lotTxt = (InpLotMode == LOT_FIXED) ? StringFormat("fixed %.2f lots", InpFixedLots) : StringFormat("risk %.2f%%", InpRiskPercent);
+   string grdTxt = InpPropGuards ? StringFormat("stops: day -%.1f%%, total -%.1f%%, target +%.1f%%", InpDailyStopPct, InpMaxDDStopPct, InpTargetPct) : "prop-firm guards OFF";
+   Label(PFX + "Hacct", x0, y, StringFormat("AUTO-TRADE %s  |  %s  |  open %d/%d  |  %s  |  %s",
+                                            InpAutoTrade ? "ON" : "OFF", lotTxt, OpenCount(), InpMaxOpen, g_guardMsg, grdTxt),
          (g_haltDay || g_haltAll) ? clrTomato : g_targetHit ? clrLime : clrGold, fs);
    y += rowH + 4;
    string hd[] = {"PAIR", "DIR", "STATUS", "GR", "OB", "ENTRY", "STOP", "TARGET", "R:R", "PIPS", "NEXT MOVE"};
@@ -935,7 +958,7 @@ void DrawPanel()
       Label(pre + "6", x0 + cols[6], y, lv ? DoubleToString(x.stop, x.dp) : "", C'255,110,110', fs, x.sym);
       Label(pre + "7", x0 + cols[7], y, lv && x.target > 0 ? DoubleToString(x.target, x.dp) : "", clrLime, fs, x.tgtSrc);
       Label(pre + "8", x0 + cols[8], y, lv && x.rr > 0 ? DoubleToString(x.rr, 1) : "", clrWhite, fs, x.sym);
-      Label(pre + "9", x0 + cols[9], y, lv ? DoubleToString(x.riskPips, 0) : "", clrSilver, fs, lv ? StringFormat("%.2f lots at %.1f%% risk", x.lots, InpRiskPercent) : "");
+      Label(pre + "9", x0 + cols[9], y, lv ? DoubleToString(x.riskPips, 0) : "", clrSilver, fs, lv ? StringFormat("%.2f lots = %.2f %s at risk (%.2f%% of equity)", x.lots, x.riskMoney, AccountCurrency(), AccountEquity() > 0 ? 100.0 * x.riskMoney / AccountEquity() : 0) : "");
       Label(pre + "10", x0 + cols[10], y, x.next, sc, fs, x.next);
       y += rowH;
       row++;
