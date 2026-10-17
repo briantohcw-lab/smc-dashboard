@@ -13,8 +13,21 @@
 //|  Works in the MT4 Strategy Tester for long-history backtests.      |
 //+------------------------------------------------------------------+
 #property copyright "Brian Toh / built with Claude"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
+
+enum ENUM_SL_MODE
+  {
+   SL_PIVOT = 0,    // Below the last 1H swing low (- 0.1 ATR)
+   SL_ATR   = 1     // N x ATR(14) from entry
+  };
+enum ENUM_TRAIL
+  {
+   TR_NONE = 0,     // No trailing stop
+   TR_BE   = 1,     // Move stop to breakeven at +X R
+   TR_STEP = 2,     // Step trail: lock in every +X R (stop = gained - 1R)
+   TR_ATR  = 3      // ATR trail: N x ATR below the highest high since entry
+  };
 
 enum ENUM_LOT_MODE
   {
@@ -31,6 +44,15 @@ input int    InpRegimeSMA    = 200;     // Daily SMA period for the trend filter
 input bool   InpAllowShorts  = false;   // Also take shorts (tested flat-to-losing; off by default)
 input int    InpMaxHoldHours = 120;     // Close after N hours (backtest: 5 days)
 input double InpMaxSpreadR   = 0.15;    // Skip if spread > this fraction of the stop distance
+//---- stop loss / take profit / trailing
+input ENUM_SL_MODE InpSLMode = SL_PIVOT;  // Stop-loss mode
+input double InpSL_ATR       = 1.5;     // SL = N x ATR (SL mode = ATR)
+input double InpTP_R         = 0;       // Take profit in R (0 = none)
+input bool   InpExitOnCross  = true;    // Exit when SMA crosses back below EMA (1H close)
+input ENUM_TRAIL InpTrailMode = TR_NONE; // Trailing stop mode
+input double InpBE_R         = 1.0;     // Breakeven trigger in R (trail = Breakeven)
+input double InpStep_R       = 0.5;     // Step size in R (trail = Step)
+input double InpTrail_ATR    = 3.0;     // N x ATR below the high (trail = ATR)
 //---- size
 input ENUM_LOT_MODE InpLotMode = LOT_RISK; // Lot size mode
 input double InpRiskPercent  = 0.5;     // Risk % per trade (lot mode = Risk %)
@@ -67,6 +89,7 @@ void OnDeinit(const int reason) { Comment(""); ObjectDelete(0, "GT_stop"); }
 void OnTick()
   {
    Guard();
+   ManageTrail();
    datetime t = iTime(NULL, PERIOD_H1, 0);
    if(t != g_lastBar && t > 0)
      {
@@ -148,7 +171,7 @@ void OnNewBar()
    if(tk >= 0 && OrderSelect(tk, SELECT_BY_TICKET))
      {
       bool isBuy = (OrderType() == OP_BUY);
-      if((isBuy && f1 < s1) || (!isBuy && f1 > s1)) { CloseTicket(tk, "SMA crossed back - trend exit"); g_last = "trend exit"; }
+      if(InpExitOnCross && ((isBuy && f1 < s1) || (!isBuy && f1 > s1))) { CloseTicket(tk, "SMA crossed back - trend exit"); g_last = "trend exit"; }
       else if(TimeCurrent() - OrderOpenTime() >= InpMaxHoldHours * 3600) { CloseTicket(tk, "max hold time"); g_last = "time exit"; }
       return;     // one position at a time
      }
@@ -166,10 +189,15 @@ void OnNewBar()
      }
    RefreshRates();
    double px = (d > 0) ? Ask : Bid;
-   double piv = Pivot(d, px);
-   if(piv <= 0) { g_last = "cross, but no swing level found for the stop"; return; }
-   double stop = piv - d * 0.1 * atr;
-   if((px - stop) * d < 0.5 * atr) stop = px - d * 0.5 * atr;
+   double stop;
+   if(InpSLMode == SL_ATR) stop = px - d * InpSL_ATR * atr;
+   else
+     {
+      double piv = Pivot(d, px);
+      if(piv <= 0) { g_last = "cross, but no swing level found for the stop"; return; }
+      stop = piv - d * 0.1 * atr;
+      if((px - stop) * d < 0.5 * atr) stop = px - d * 0.5 * atr;
+     }
    double risk = (px - stop) * d;
    if(Ask - Bid > InpMaxSpreadR * risk) { g_last = "cross skipped: spread too wide vs stop"; return; }
 
@@ -185,8 +213,9 @@ void OnNewBar()
       lots = MathMin(mx, lots);
      }
    double sl = NormalizeDouble(stop, Digits);
+   double tp = (InpTP_R > 0) ? NormalizeDouble(px + d * InpTP_R * risk, Digits) : 0;
    int type = (d > 0) ? OP_BUY : OP_SELL;
-   int t = OrderSend(Symbol(), type, lots, px, InpSlippage * 10, sl, 0, "GoldTrend", InpMagic, 0, d > 0 ? clrDodgerBlue : clrTomato);
+   int t = OrderSend(Symbol(), type, lots, px, InpSlippage * 10, sl, tp, "GoldTrend", InpMagic, 0, d > 0 ? clrDodgerBlue : clrTomato);
    if(t < 0)
      {
       int err = GetLastError();
@@ -194,13 +223,55 @@ void OnNewBar()
         {
          RefreshRates(); px = (d > 0) ? Ask : Bid;
          t = OrderSend(Symbol(), type, lots, px, InpSlippage * 10, 0, 0, "GoldTrend", InpMagic, 0, d > 0 ? clrDodgerBlue : clrTomato);
-         if(t >= 0 && !OrderModify(t, px, sl, 0, 0)) { Print("Gold_Trend_EA: could not set stop - closing"); CloseTicket(t, "no stop"); return; }
+         if(t >= 0 && OrderSelect(t, SELECT_BY_TICKET) && !OrderModify(t, OrderOpenPrice(), sl, tp, 0)) { Print("Gold_Trend_EA: could not set stop - closing"); CloseTicket(t, "no stop"); return; }
         }
       if(t < 0) { Print("Gold_Trend_EA order failed ", err); g_last = "order failed, error " + IntegerToString(err); return; }
      }
-   g_last = StringFormat("%s %.2f lots @ %s, stop %s", d > 0 ? "BUY" : "SELL", lots, DoubleToString(px, Digits), DoubleToString(sl, Digits));
+   GlobalVariableSet("GT_R_" + IntegerToString(t), risk);   // the initial 1R, for breakeven / step trailing
+   g_last = StringFormat("%s %.2f lots @ %s, stop %s, TP %s", d > 0 ? "BUY" : "SELL", lots, DoubleToString(px, Digits), DoubleToString(sl, Digits), tp > 0 ? DoubleToString(tp, Digits) : "none");
    Notify(StringFormat("GOLD TREND: %s %.2f lots @ %s, stop %s (%.1f risk), exit when SMA%d crosses back below EMA%d", d > 0 ? "BUY" : "SELL", lots,
                        DoubleToString(px, Digits), DoubleToString(sl, Digits), risk, InpFastSMA, InpSlowEMA));
+  }
+
+
+//+------------------------------------------------------------------+
+//| trailing stop: breakeven / step / ATR                            |
+//+------------------------------------------------------------------+
+void ManageTrail()
+  {
+   if(InpTrailMode == TR_NONE) return;
+   int tk = MyPosition();
+   if(tk < 0 || !OrderSelect(tk, SELECT_BY_TICKET)) return;
+   int d = (OrderType() == OP_BUY) ? 1 : -1;
+   double open = OrderOpenPrice(), cur = OrderStopLoss();
+   string gv = "GT_R_" + IntegerToString(tk);
+   double R = GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : MathAbs(open - cur);
+   if(R <= 0) return;
+   // best price since entry, from 1H highs/lows plus the current price
+   int sh = iBarShift(NULL, PERIOD_H1, OrderOpenTime());
+   double best;
+   if(d > 0) { best = iHigh(NULL, PERIOD_H1, iHighest(NULL, PERIOD_H1, MODE_HIGH, sh + 1, 0)); best = MathMax(best, Bid); }
+   else      { best = iLow(NULL, PERIOD_H1, iLowest(NULL, PERIOD_H1, MODE_LOW, sh + 1, 0));   best = MathMin(best, Ask); }
+   double mfeR = (best - open) * d / R;
+   double ns = cur;
+   if(InpTrailMode == TR_BE && mfeR >= InpBE_R) ns = open;
+   if(InpTrailMode == TR_STEP && InpStep_R > 0)
+     {
+      double gained = MathFloor(mfeR / InpStep_R) * InpStep_R;
+      if(gained >= 1.0) ns = open + d * (gained - 1.0) * R;
+     }
+   if(InpTrailMode == TR_ATR)
+     {
+      double atr = iATR(NULL, PERIOD_H1, 14, 1);
+      if(atr > 0) ns = best - d * InpTrail_ATR * atr;
+     }
+   ns = NormalizeDouble(ns, Digits);
+   if((ns - cur) * d <= Point) return;                         // only ever tighten
+   double px = (d > 0) ? Bid : Ask;
+   double minDist = MarketInfo(Symbol(), MODE_STOPLEVEL) * Point;
+   if((px - ns) * d <= minDist) return;                        // too close to price for the broker
+   if(OrderModify(tk, open, ns, OrderTakeProfit(), 0, clrGold))
+      g_last = StringFormat("trailing stop moved to %s (+%.1fR best)", DoubleToString(ns, Digits), mfeR);
   }
 
 //+------------------------------------------------------------------+
@@ -246,11 +317,14 @@ void Panel()
      }
    else ObjectDelete(0, "GT_stop");
    string next;
-   if(tk >= 0) next = StringFormat("exit when a 1H candle closes with SMA%d below EMA%d", InpFastSMA, InpSlowEMA);
+   if(tk >= 0) next = InpExitOnCross ? StringFormat("exit when a 1H candle closes with SMA%d below EMA%d (or stop/TP)", InpFastSMA, InpSlowEMA) : "exit at stop / TP / trailing stop / time limit";
    else if(rg == -1) next = "stand aside until the daily close is back above the SMA";
    else next = (f1 > s1) ? StringFormat("SMA%d already above EMA%d - wait for the next fresh cross up", InpFastSMA, InpSlowEMA)
                          : StringFormat("wait for SMA%d to cross above EMA%d on a 1H close", InpFastSMA, InpSlowEMA);
    string lot = (InpLotMode == LOT_FIXED) ? StringFormat("fixed %.2f lots", InpFixedLots) : StringFormat("risk %.2f%%", InpRiskPercent);
+   string tn[] = {"none", "breakeven", "step", "ATR"};
+   lot += StringFormat("  |  SL %s  TP %s  trail %s%s", InpSLMode == SL_ATR ? DoubleToString(InpSL_ATR, 1) + "xATR" : "swing low",
+                       InpTP_R > 0 ? DoubleToString(InpTP_R, 1) + "R" : "none", tn[(int)InpTrailMode], InpExitOnCross ? " + MA exit" : "");
    Comment(StringFormat("GOLD TREND EA  |  %s  |  %s%s\nDaily trend: %s\n1H: SMA%d %s  EMA%d %s  (%s)\nPosition: %s\nNext: %s\nLast: %s",
                         Symbol(), lot, InpPropGuards ? "  |  prop guards ON" : "", reg,
                         InpFastSMA, DoubleToString(f1, Digits), InpSlowEMA, DoubleToString(s1, Digits), f1 > s1 ? "bullish" : "bearish",
