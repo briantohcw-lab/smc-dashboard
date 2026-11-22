@@ -385,7 +385,17 @@
   .tv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;padding-bottom:6px}
   .tv-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:0}
   .tv-card.dead{opacity:.5}
-  .tv-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .tv-card.watch{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn) inset,0 0 14px rgba(240,180,41,.18)}
+  .tv-watch-tag{font-size:9px;font-weight:700;letter-spacing:.08em;padding:2px 6px;border-radius:4px;background:var(--warn);color:#111;white-space:nowrap}
+  .tv-watch{border:1px solid var(--warn);border-radius:10px;padding:8px 12px;margin:0 0 12px;background:rgba(240,180,41,.06)}
+  .tv-watch-h{font-size:10px;letter-spacing:.1em;color:var(--warn);font-weight:700;margin-bottom:6px}
+  .tv-watch-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:11px;color:var(--text2);padding:4px 0;border-top:1px solid var(--border)}
+  .tv-watch-row:first-of-type{border-top:0}
+  .tv-watch-row .wp{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--text)}
+  .tv-watch-row .wb{color:var(--warn);font-weight:600}
+  .tv-top .tv-btn{font-size:10px;padding:3px 7px}
+  .tv-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-bottom:6px}
+  .tv-top > span{white-space:nowrap}
   .tv-pair{font-weight:700;font-size:14px;letter-spacing:.04em}
   .tv-badge{margin-left:auto;font-size:9px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;border:1px solid currentColor;white-space:nowrap}
   .tv-card svg{display:block;width:100%;height:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px}
@@ -644,6 +654,7 @@
       </div>
     </div>
     <div class="tv-meta" id="tvMeta"></div>
+    <div id="tvWatch"></div>
     <div class="tv-key">
       <span><i style="border-color:#b48cff"></i>15m CHoCH level</span>
       <span><i style="border-color:#b48cff;border-top-width:6px;border-top-style:solid;opacity:.5"></i>15m OB = entry zone</span>
@@ -749,9 +760,10 @@ function fmt(pair,v){
 function setText(id,txt){ const e=$(id); if(e) e.textContent=txt; }
 
 // ---- TradingView deep link ----
+const TV_PREFIX = {EURCHF:'OANDA',NZDCAD:'OANDA',XAUUSD:'OANDA',NZDCHF:'CAPITALCOM',NZDJPY:'CAPITALCOM',NZDUSD:'CAPITALCOM',BTCUSD:'COINBASE'};
 function tvLink(pair){
-  const p = String(pair||'').replace('/','');
-  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent((p.indexOf('XAU')>=0?'OANDA:':'FX:')+p);
+  const p = String(pair||'').replace('/','').toUpperCase();
+  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent((TV_PREFIX[p]||(p.indexOf('XAU')>=0?'OANDA':'FX'))+':'+p)+'&interval=15';
 }
 function tvButton(pair){
   return '<a class="tv-btn" href="'+tvLink(pair)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">📈 TV</a>';
@@ -1994,6 +2006,23 @@ const TV_STATUS = {
   invalid: {t:'INVALIDATED',         c:'var(--text3)',rank:6}
 };
 let tvShowDead = false;
+let tvWeekWatch = null;
+function tvWatchFor(name){
+  const n = String(name||'').toUpperCase();
+  const items = (tvWeekWatch && tvWeekWatch.items) || [];
+  for(let i=0;i<items.length;i++){ if((items[i].pairs||[]).indexOf(n) >= 0) return items[i]; }
+  return null;
+}
+function renderWeekWatch(){
+  const el = $('tvWatch'); if(!el) return;
+  const items = (tvWeekWatch && tvWeekWatch.items) || [];
+  if(!items.length){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="tv-watch"><div class="tv-watch-h">★ WATCH THIS WEEK'+(tvWeekWatch.week?' · week of '+tvEsc(tvWeekWatch.week):'')+'</div>'+
+    items.map(function(it){
+      return '<div class="tv-watch-row">'+(it.pairs||[]).map(function(pr){ return '<span class="wp">'+tvEsc(pr)+' '+tvButton(pr)+'</span>'; }).join('')+
+        (it.bias?'<span class="wb">'+tvEsc(it.bias)+'</span>':'')+'<span>'+tvEsc(it.why||'')+'</span></div>';
+    }).join('')+'</div>';
+}
 
 function tvEsc(v){ return String(v==null?'':v).replace(/[&<>"]/g, function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]; }); }
 function tvNum(v, dp){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(dp); }
@@ -2155,10 +2184,11 @@ function tvCard(p){
   if(hits.length > 1){
     rows += '<div style="color:var(--text3)">also: '+hits.slice(1).map(function(x){ return (x.dir>0?'bull':'bear')+' OB '+tvNum(x.lo,dp)+'–'+tvNum(x.hi,dp)+' ('+((TV_STATUS[x.status]||{t:x.status}).t.toLowerCase())+')'; }).join('; ')+'</div>';
   }
-  return '<div class="tv-card'+(dead?' dead':'')+'">'+
+  const wItem = tvWatchFor(p.name);
+  return '<div class="tv-card'+(dead?' dead':'')+(wItem?' watch':'')+'"'+(wItem?' title="On this week\'s watch list: '+tvEsc(wItem.bias+' — '+wItem.why)+'"':'')+'>'+
     '<div class="tv-top">'+(h.grade?'<span title="Grade = daily candle. A = daily agrees, B = neutral, C = against (backtest May-Oct 2026: A +0.34R per trade, C -0.14R)" style="font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;border:1px solid '+TV_GRADE[h.grade].c+';color:'+TV_GRADE[h.grade].c+'">'+h.grade+'</span>':'')+'<span class="tv-pair">'+tvEsc(p.name)+'</span><span style="color:'+dirCol+';font-size:11px;font-weight:700">'+dirTxt+'</span>'+
     '<span style="font-size:11px;color:var(--text2)" title="price at scan time">'+tvNum(p.price,dp)+(p.priceT?' <span style="color:var(--text3)">@'+tvTime(p.priceT+900).slice(-5)+'</span>':'')+'</span>'+
-    '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span></div>'+
+    '<span class="tv-badge" style="color:'+S.c+'">'+S.t+'</span>'+(wItem?'<span class="tv-watch-tag">★ WATCH</span>':'')+tvButton(p.name)+'</div>'+
     tvChart(p, h)+'<div class="tv-rows">'+rows+'</div>'+
     (p.note ? '<div class="tv-note"><span style="color:var(--text3)">'+(p.noteAt?'Claude note from '+tvTime(p.noteAt):'Note at scan time')+':</span> '+tvEsc(p.note)+'</div>' : '')+'</div>';
 }
@@ -2166,7 +2196,10 @@ function tvCard(p){
 async function loadTvScan(){
   const grid = $('tvGrid'), meta = $('tvMeta');
   if(!grid) return;
-  const d = await getJSON('/tv-scan');
+  const both = await Promise.all([getJSON('/tv-scan'), getJSON('/week-watch')]);
+  const d = both[0];
+  tvWeekWatch = both[1] || null;
+  renderWeekWatch();
   const scan = d && d.scan;
   if(!scan){
     grid.innerHTML = '<div class="tv-empty">No TradingView scan received yet. Scans arrive automatically about an hour before the Asian, London and NY sessions while TradingView is open on the PC.</div>';
@@ -2175,7 +2208,8 @@ async function loadTvScan(){
   }
   const pairs = (scan.pairs || []).slice();
   const best = function(p){ let r = 99; (p.hits||[]).forEach(function(h){ r = Math.min(r, tvKey(h)); }); return r; };
-  pairs.sort(function(a, b){ return best(a) - best(b); });
+  const wbest = function(p){ return best(p) - (tvWatchFor(p.name) ? 0.25 : 0); };
+  pairs.sort(function(a, b){ return wbest(a) - wbest(b); });
   const live = pairs.filter(function(p){ return best(p) < 40; });
   const dead = pairs.filter(function(p){ return best(p) >= 40; });
   const nA = live.filter(function(p){ return (p.hits||[]).some(function(h){ return h.grade === 'A' && (TV_STATUS[h.status]||{rank:9}).rank < 4; }); }).length;

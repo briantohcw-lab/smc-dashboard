@@ -2511,6 +2511,65 @@ def tv_scan_route():
     return jsonify({'ok': True, 'pairs': len(scan['pairs']), 'received_at': now})
 
 
+# ---- weekly watch list (posted by Claude each Saturday / Monday) ----
+# The dashboard highlights these pairs on the TradingView scan cards and
+# lists them in a strip above the cards. Same token as /tv-scan.
+WEEK_WATCH_FILE = os.environ.get('WEEK_WATCH_FILE', '/tmp/smc_week_watch.json')
+week_watch = {'week': None, 'items': [], 'received_at': None}
+_ww_lock = threading.Lock()
+
+
+def _load_week_watch():
+    try:
+        with open(WEEK_WATCH_FILE) as f:
+            d = json.load(f)
+        if isinstance(d, dict) and isinstance(d.get('items'), list):
+            week_watch.update(d)
+    except Exception:
+        pass
+
+
+@app.route('/week-watch', methods=['GET', 'POST'])
+def week_watch_route():
+    if request.method == 'GET':
+        with _ww_lock:
+            return jsonify(week_watch)
+
+    if not TV_SCAN_TOKEN:
+        return jsonify({'ok': False, 'error': 'TV_SCAN_TOKEN not set in Railway'}), 403
+    if (request.content_length or 0) > 100_000:
+        return jsonify({'ok': False, 'error': 'payload too large'}), 413
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'expected a JSON object'}), 400
+    if str(body.get('token', '')) != TV_SCAN_TOKEN:
+        return jsonify({'ok': False, 'error': 'bad token'}), 403
+    raw = body.get('items')
+    if not isinstance(raw, list):
+        return jsonify({'ok': False, 'error': 'items missing'}), 400
+    items = []
+    for it in raw[:20]:
+        if not isinstance(it, dict):
+            continue
+        pairs = [str(x).upper().replace('/', '')[:10] for x in (it.get('pairs') or [it.get('pair')]) if x]
+        if not pairs:
+            continue
+        items.append({
+            'pairs': pairs,
+            'bias': str(it.get('bias', ''))[:40],
+            'why': str(it.get('why', ''))[:300],
+        })
+    now = datetime.now(timezone.utc).isoformat()
+    with _ww_lock:
+        week_watch.update({'week': str(body.get('week', ''))[:20], 'items': items, 'received_at': now})
+        try:
+            with open(WEEK_WATCH_FILE, 'w') as f:
+                json.dump(week_watch, f)
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'items': len(items), 'received_at': now})
+
+
 @app.route('/daily-sr')
 def get_daily_sr():
     """
@@ -2919,6 +2978,7 @@ def backtest():
 
 
 _load_tv_scan()
+_load_week_watch()
 
 # ── Start background scanner when app boots ──
 if API_KEY:
