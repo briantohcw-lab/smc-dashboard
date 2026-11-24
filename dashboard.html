@@ -394,6 +394,14 @@
   .tv-watch-row .wp{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--text)}
   .tv-watch-row .wb{color:var(--warn);font-weight:600}
   .tv-top .tv-btn{font-size:10px;padding:3px 7px}
+  .gold-card{border:1px solid #d4a72c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:rgba(212,167,44,.06)}
+  .gold-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-bottom:4px}
+  .gold-h .gt{font-weight:700;letter-spacing:.06em;color:#d4a72c}
+  .gold-rule{font-size:10px;color:var(--text3);margin-bottom:6px}
+  .gold-row{border-top:1px solid var(--border);padding:6px 0;font-size:11px;color:var(--text2);display:flex;flex-direction:column;gap:3px}
+  .gold-row:first-of-type{border-top:0}
+  .gold-st{font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:4px;border:1px solid currentColor;white-space:nowrap}
+  .gold-line{font-family:inherit;background:var(--bg2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:6px;padding:4px 7px;color:var(--text);user-select:all;white-space:normal;word-break:break-word}
   .tv-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-bottom:6px}
   .tv-top > span{white-space:nowrap}
   .tv-pair{font-weight:700;font-size:14px;letter-spacing:.04em}
@@ -655,6 +663,7 @@
     </div>
     <div class="tv-meta" id="tvMeta"></div>
     <div id="tvWatch"></div>
+    <div id="tvGold"></div>
     <div class="tv-key">
       <span><i style="border-color:#b48cff"></i>15m CHoCH level</span>
       <span><i style="border-color:#b48cff;border-top-width:6px;border-top-style:solid;opacity:.5"></i>15m OB = entry zone</span>
@@ -2007,6 +2016,40 @@ const TV_STATUS = {
 };
 let tvShowDead = false;
 let tvWeekWatch = null;
+const GOLD_ST = {
+  'order set':{c:'var(--accent)',t:'ORDER SET',live:1}, 'filled':{c:'var(--bull)',t:'IN TRADE',live:1},
+  'waiting for 15m CHoCH':{c:'var(--warn)',t:'WAIT 15M CHOCH',live:1}, 'touched':{c:'var(--warn)',t:'TOUCHED 1H OB',live:1},
+  'target':{c:'var(--bull)',t:'TARGET +3R'}, 'stopped':{c:'var(--bear)',t:'STOPPED −1R'}, 'closed 24h':{c:'var(--text2)',t:'CLOSED 24H'},
+  'expired unfilled':{c:'var(--text3)',t:'EXPIRED'}, 'cancelled (stop hit before fill)':{c:'var(--text3)',t:'CANCELLED'},
+  'daily-against':{c:'var(--text3)',t:'SKIP · DAILY AGAINST'}, '1H OB broken':{c:'var(--text3)',t:'1H OB BROKEN'},
+  'no CHoCH (12h passed)':{c:'var(--text3)',t:'NO CHOCH'}, 'stop too tight':{c:'var(--text3)',t:'STOP TOO TIGHT'}
+};
+function renderGold(g){
+  const el = $('tvGold'); if(!el) return;
+  if(!g){ el.innerHTML = ''; return; }
+  const f = function(v){ return v==null ? '–' : (+v).toFixed(2); };
+  const rows = (g.setups || []).slice().sort(function(a,b){ return (GOLD_ST[b.state]||{}).live - (GOLD_ST[a.state]||{}).live || b.touchT - a.touchT; }).map(function(x){
+    const st = GOLD_ST[x.state] || {c:'var(--text3)',t:String(x.state).toUpperCase()};
+    const dirTxt = x.d > 0 ? '<b style="color:var(--bull)">▲ LONG</b>' : '<b style="color:var(--bear)">▼ SHORT</b>';
+    let lines = '<div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center">'+dirTxt+
+      '<span class="gold-st" style="color:'+st.c+'">'+st.t+'</span>'+
+      '<span>1H OB '+f(x.ob.lo)+'–'+f(x.ob.hi)+' · touched '+tvTime(x.touchT)+'</span>'+
+      (x.chochT ? '<span>15m CHoCH '+f(x.chochLvl)+' @ '+tvTime(x.chochT - 900)+'</span>' : '')+'</div>';
+    if(x.entry != null){
+      const lot = x.risk > 0 ? Math.max(0, Math.floor(35 / x.risk)) / 100 : 0;
+      lines += '<div>5m OB '+f(x.ob5.lo)+'–'+f(x.ob5.hi)+' · risk $'+f(x.risk)+'/oz'+
+        (x.state === 'order set' ? ' · order valid until '+tvTime(x.expires) : '')+
+        (x.fillT ? ' · filled '+tvTime(x.fillT) : '')+
+        (x.openR != null ? ' · now <b style="color:'+(x.openR>=0?'var(--bull)':'var(--bear)')+'">'+(x.openR>=0?'+':'')+x.openR.toFixed(2)+'R</b>' : '')+'</div>';
+      if(st.live) lines += '<div class="gold-line">'+(x.d>0?'BUY':'SELL')+(x.state==='order set'?' LIMIT':'')+' XAUUSD '+f(x.entry)+' · SL '+f(x.stop)+' · TP '+f(x.tp)+' · '+(lot>0?lot.toFixed(2):'0.01 risks more than $35 —')+' lot</div>';
+    }
+    return '<div class="gold-row">'+lines+'</div>';
+  }).join('');
+  el.innerHTML = '<div class="gold-card"><div class="gold-h"><span class="gt">XAUUSD · GOLD SETUP (1H → 15m → 5m)</span>'+
+    tvButton('XAUUSD')+(g.price!=null?'<span style="font-size:11px;color:var(--text2)">'+f(g.price)+' @'+tvTime(g.at+300).slice(-5)+'</span>':'')+'</div>'+
+    '<div class="gold-rule">'+tvEsc(g.rule||'')+'. Last 36h shown. $35 risk per trade (0.01 lot = 1 oz). Backtest: about +0.4–0.7R a trade over 5 months (22–23 trades) — still being tested.</div>'+
+    (rows || '<div class="gold-row">No 1H order-block touch in the last 36 hours.</div>')+'</div>';
+}
 function tvWatchFor(name){
   const n = String(name||'').toUpperCase();
   const items = (tvWeekWatch && tvWeekWatch.items) || [];
@@ -2201,6 +2244,7 @@ async function loadTvScan(){
   tvWeekWatch = both[1] || null;
   renderWeekWatch();
   const scan = d && d.scan;
+  renderGold(scan && scan.gold);
   if(!scan){
     grid.innerHTML = '<div class="tv-empty">No TradingView scan received yet. Scans arrive automatically about an hour before the Asian, London and NY sessions while TradingView is open on the PC.</div>';
     meta.innerHTML = ''; $('c-tv').textContent = '0';
