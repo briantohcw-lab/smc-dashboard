@@ -2132,7 +2132,9 @@ function goldSteps(g){
 }
 function renderGold(g){
   const el = $('tvGold'); if(!el) return;
-  if(!g){ el.innerHTML = ''; return; }
+  // keep the gold checklist on screen permanently: fall back to the last good gold data if a scan has none
+  try{ if(g && g.ctx) localStorage.setItem('smcGoldLast', JSON.stringify(g)); else if(!g || !g.ctx){ const c = JSON.parse(localStorage.getItem('smcGoldLast')||'null'); if(c){ g = c; g.stale = true; } } }catch(e){}
+  if(!g){ el.innerHTML = '<div class="gold-card"><div class="gold-h"><span class="gt">XAUUSD · 1H → 15m → 5m</span>'+tvButton('XAUUSD')+'</div><div class="gold-row">Waiting for the next hourly scan (needs TradingView open on your PC).</div></div>'; return; }
   const f = function(v){ return v==null ? '–' : (+v).toFixed(2); };
   const rows = (g.setups || []).slice().sort(function(a,b){ return (GOLD_ST[b.state]||{}).live - (GOLD_ST[a.state]||{}).live || b.touchT - a.touchT; }).map(function(x){
     const st = GOLD_ST[x.state] || {c:'var(--text3)',t:String(x.state).toUpperCase()};
@@ -2155,7 +2157,7 @@ function renderGold(g){
   el.innerHTML = '<div class="gold-card"><div class="gold-h"><span class="gt">XAUUSD · 1H → 15m → 5m</span>'+
     tvButton('XAUUSD')+'<span class="gold-badge" style="background:'+ST.badge[1]+'">'+ST.badge[0]+'</span>'+
     (ST.dd ? '<span class="gold-bias" style="color:'+(ST.dd<0?'var(--bear)':'var(--bull)')+'">Bias: '+(ST.dd<0?'SELLS ONLY ▼':'BUYS ONLY ▲')+'</span>' : '')+
-    (g.price!=null?'<span style="font-size:11px;color:var(--text2);margin-left:auto">'+f(g.price)+' @'+tvTime(g.at+300).slice(-5)+'</span>':'')+'</div>'+
+    (g.price!=null?'<span style="font-size:11px;color:var(--text2);margin-left:auto">'+f(g.price)+' @'+tvTime(g.at+300)+(g.stale?' · last known':'')+'</span>':'')+'</div>'+
     goldChart(g)+ST.html+
     '<div class="gold-rule">'+tvEsc(g.rule||'')+'. Last 36h shown. $35 risk per trade (0.01 lot = 1 oz). Backtest: about +0.4–0.7R a trade over 5 months (22–23 trades) — still being tested.</div>'+
     (rows || '<div class="gold-row">No 1H order-block touch in the last 36 hours.</div>')+'</div>';
