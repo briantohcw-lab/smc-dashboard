@@ -394,6 +394,20 @@
   .tv-watch-row .wp{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--text)}
   .tv-watch-row .wb{color:var(--warn);font-weight:600}
   .tv-top .tv-btn{font-size:10px;padding:3px 7px}
+  .gold-viz{display:grid;grid-template-columns:auto 1fr auto;gap:8px 14px;align-items:center;margin:4px 0 8px}
+  .gold-badge{font-weight:800;font-size:12px;letter-spacing:.05em;padding:4px 10px;border-radius:6px;color:#0d1117}
+  .gold-bias{font-weight:700;font-size:12px}
+  .gold-svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--border);border-radius:8px}
+  .gold-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0 6px}
+  .gold-step{border:2px solid var(--dim);border-radius:9px;padding:8px 10px;background:var(--panel2);position:relative;min-width:0}
+  .gold-step .k{font-weight:800;font-size:13px;letter-spacing:.03em}
+  .gold-step .v{font-size:11px;color:var(--text);margin-top:4px;white-space:pre-line}
+  .gold-step:not(:last-child)::after{content:'›';position:absolute;right:-9px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:18px}
+  .gold-step.ok{border-color:var(--bull)} .gold-step.ok .k{color:var(--bull)}
+  .gold-step.now{border-color:var(--warn)} .gold-step.now .k{color:var(--warn)}
+  .gold-step.off .k{color:var(--text3)}
+  .gold-warn{font-size:11px;color:var(--warn);margin:2px 0 4px}
+  @media (max-width:640px){.gold-steps{grid-template-columns:repeat(2,1fr)}.gold-step:nth-child(2)::after{display:none}.gold-viz{grid-template-columns:1fr}}
   .gold-card{border:1px solid #d4a72c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:rgba(212,167,44,.06)}
   .gold-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-bottom:4px}
   .gold-h .gt{font-weight:700;letter-spacing:.06em;color:#d4a72c}
@@ -2024,6 +2038,98 @@ const GOLD_ST = {
   'daily-against':{c:'var(--text3)',t:'SKIP · DAILY AGAINST'}, '1H OB broken':{c:'var(--text3)',t:'1H OB BROKEN'},
   'no CHoCH (12h passed)':{c:'var(--text3)',t:'NO CHOCH'}, 'stop too tight':{c:'var(--text3)',t:'STOP TOO TIGHT'}
 };
+function goldChart(g){
+  const cx = g.ctx; if(!cx || !cx.bars || !cx.bars.length) return '';
+  const b = cx.bars, n = b.length, W = 900, H = 330, L = 8, R = 150, T = 10, B = 24;
+  const allowed = (cx.zones||[]).filter(function(z){ return !cx.dayDir || z.d === cx.dayDir; });
+  const others = (cx.zones||[]).filter(function(z){ return cx.dayDir && z.d !== cx.dayDir; });
+  let lo = Infinity, hi = -Infinity;
+  b.forEach(function(x){ lo = Math.min(lo, x[3]); hi = Math.max(hi, x[2]); });
+  (cx.zones||[]).forEach(function(z){ lo = Math.min(lo, z.lo); hi = Math.max(hi, z.hi); });
+  const pad = (hi - lo) * 0.04; lo -= pad; hi += pad;
+  const pw = W - L - R, step = pw / (n + 6);
+  const X = function(i){ return L + (i + 0.5) * step; };
+  const Y = function(v){ return T + (hi - v) / (hi - lo) * (H - T - B); };
+  const idxAt = function(t){ for(let i=0;i<n;i++){ if(b[i][0] >= t) return i; } return 0; };
+  let out = '';
+  // grid + labels
+  const gs = Math.pow(10, Math.floor(Math.log10((hi-lo)/4))); const gstep = [1,2,2.5,5,10].map(function(m){return m*gs;}).find(function(v){return (hi-lo)/v <= 6;}) || gs*10;
+  for(let v = Math.ceil(lo/gstep)*gstep; v < hi; v += gstep){
+    out += '<line x1="'+L+'" x2="'+(W-R+60)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="var(--border)" stroke-width="1"/>'+
+      '<text x="'+(W-4)+'" y="'+(Y(v)+4)+'" text-anchor="end" font-size="11" fill="var(--text3)">'+v.toFixed(0)+'</text>';
+  }
+  // zones
+  const zoneRect = function(z, strong, label){
+    const x0 = X(idxAt(z.ot)) - step*0.4, x1 = L + (n + 5) * step;
+    const col = z.d < 0 ? 'var(--bear)' : 'var(--bull)';
+    return '<rect x="'+x0+'" y="'+Y(z.hi)+'" width="'+(x1-x0)+'" height="'+Math.max(2,Y(z.lo)-Y(z.hi))+'" fill="'+col+'" opacity="'+(strong?0.22:0.08)+'"/>'+
+      '<text x="'+(x1-6)+'" y="'+((Y(z.hi)+Y(z.lo))/2-2)+'" text-anchor="end" font-size="12" font-weight="700" fill="var(--text)">'+label+'</text>'+
+      '<text x="'+(x1-6)+'" y="'+((Y(z.hi)+Y(z.lo))/2+13)+'" text-anchor="end" font-size="12" fill="var(--text2)">'+z.lo.toFixed(0)+'–'+z.hi.toFixed(0)+'</text>';
+  };
+  others.forEach(function(z){ out += zoneRect(z, false, (z.d<0?'1H SELL':'1H BUY')+' (blocked)'); });
+  allowed.slice().sort(function(a,c){ return Math.abs((a.lo+a.hi)/2 - g.price) - Math.abs((c.lo+c.hi)/2 - g.price); })
+    .forEach(function(z, k){ out += zoneRect(z, k === 0, (z.d<0?'1H SELL ZONE':'1H BUY ZONE')); });
+  // candles
+  b.forEach(function(x, i){
+    const up = x[4] >= x[1], col = up ? 'var(--bull)' : 'var(--bear)';
+    out += '<line x1="'+X(i)+'" x2="'+X(i)+'" y1="'+Y(x[2])+'" y2="'+Y(x[3])+'" stroke="'+col+'" stroke-width="1"/>'+
+      '<rect x="'+(X(i)-step*0.35)+'" y="'+Y(Math.max(x[1],x[4]))+'" width="'+(step*0.7)+'" height="'+Math.max(1,Math.abs(Y(x[1])-Y(x[4])))+'" fill="'+col+'"/>';
+  });
+  // day separators / time labels (SGT 00:00 and 12:00)
+  b.forEach(function(x, i){
+    const d = new Date((x[0] + 8*3600) * 1000), h = d.getUTCHours();
+    if((h === 0 || h === 12) && X(i) > 40) out += '<text x="'+X(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="11" fill="var(--text3)">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()]+' '+(h?'12:00':'00:00')+'</text>';
+  });
+  // today low
+  if(cx.today){ out += '<line x1="'+L+'" x2="'+(W-R+60)+'" y1="'+Y(cx.today.l)+'" y2="'+Y(cx.today.l)+'" stroke="var(--text3)" stroke-dasharray="2 3"/>'+
+    '<text x="'+(L+4)+'" y="'+(Y(cx.today.l)+14)+'" font-size="11" fill="var(--text3)">Today low '+cx.today.l.toFixed(0)+'</text>'; }
+  // price
+  const p = g.price;
+  out += '<line x1="'+L+'" x2="'+(W-R+60)+'" y1="'+Y(p)+'" y2="'+Y(p)+'" stroke="var(--warn)" stroke-dasharray="6 4" stroke-width="1.4"/>'+
+    '<rect x="'+(W-R+60)+'" y="'+(Y(p)-11)+'" width="'+(R-62)+'" height="22" rx="3" fill="var(--warn)"/>'+
+    '<text x="'+(W-R+64)+'" y="'+(Y(p)+5)+'" font-size="13" font-weight="800" fill="#0d1117">NOW '+p.toFixed(0)+'</text>';
+  // distance arrow to nearest allowed untouched zone
+  const near = allowed.slice().sort(function(a,c){ return Math.abs((a.lo+a.hi)/2-p) - Math.abs((c.lo+c.hi)/2-p); })[0];
+  const hasLive = (g.setups||[]).some(function(x){ return (GOLD_ST[x.state]||{}).live; });
+  if(near && !hasLive){
+    const edge = near.d < 0 ? near.lo : near.hi, ax = L + (n + 2) * step;
+    if((near.d < 0 && edge > p) || (near.d > 0 && edge < p)){
+      out += '<defs><marker id="gArr" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--warn)"/></marker></defs>'+
+        '<line x1="'+ax+'" x2="'+ax+'" y1="'+Y(p)+'" y2="'+Y(edge)+'" stroke="var(--warn)" stroke-width="2.2" marker-end="url(#gArr)"/>'+
+        '<text x="'+(ax+7)+'" y="'+((Y(p)+Y(edge))/2+4)+'" font-size="12" font-weight="700" fill="var(--warn)">'+(edge>p?'+':'−')+'$'+Math.abs(edge-p).toFixed(0)+'</text>';
+    }
+  }
+  // live order lines
+  (g.setups||[]).filter(function(x){ return x.entry != null && (x.state==='order set'||x.state==='filled'); }).forEach(function(x){
+    [[x.entry,'var(--accent)','ENTRY'],[x.stop,'var(--bear)','SL'],[x.tp,'var(--bull)','TP']].forEach(function(r){
+      out += '<line x1="'+L+'" x2="'+(W-R+60)+'" y1="'+Y(r[0])+'" y2="'+Y(r[0])+'" stroke="'+r[1]+'" stroke-width="1.6"/>'+
+        '<text x="'+(W-R+64)+'" y="'+(Y(r[0])+4)+'" font-size="11" font-weight="700" fill="'+r[1]+'">'+r[2]+' '+(+r[0]).toFixed(1)+'</text>';
+    });
+  });
+  return '<svg class="gold-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+out+'</svg>';
+}
+function goldSteps(g){
+  const cx = g.ctx || {}, dd = cx.dayDir || 0, f0 = function(v){ return (+v).toFixed(0); };
+  const live = (g.setups||[]).filter(function(x){ return (GOLD_ST[x.state]||{}).live; }).sort(function(a,c){ return c.touchT - a.touchT; })[0];
+  const allowed = (cx.zones||[]).filter(function(z){ return !dd || z.d === dd; }).sort(function(a,c){ return Math.abs((a.lo+a.hi)/2-g.price) - Math.abs((c.lo+c.hi)/2-g.price); });
+  const side = dd < 0 ? 'SELL' : dd > 0 ? 'BUY' : '–';
+  const s1 = {k:'DAILY', c: dd ? 'ok' : 'now', i: dd ? '✔' : '…', v: dd < 0 ? 'Bearish ▼ → sells only' : dd > 0 ? 'Bullish ▲ → buys only' : 'No previous day'};
+  let s2, s3, s4;
+  if(live){
+    s2 = {k:'1H OB', c:'ok', i:'✔', v:'Tapped\n'+f0(live.ob.lo)+'–'+f0(live.ob.hi)};
+    s3 = live.chochT ? {k:'15m CHoCH', c:'ok', i:'✔', v:'Broke '+(+live.chochLvl).toFixed(1)} : {k:'15m CHoCH', c:'now', i:'…', v:'Waiting (12h window)'};
+    s4 = live.entry != null && live.state === 'order set' ? {k:'5m OB LIMIT', c:'now', i:'…', v:(live.d>0?'BUY':'SELL')+' LIMIT '+(+live.entry).toFixed(1)+'\nSL '+(+live.stop).toFixed(1)+' · TP '+(+live.tp).toFixed(1)}
+       : live.state === 'filled' ? {k:'5m OB LIMIT', c:'ok', i:'✔', v:'IN TRADE '+(live.openR!=null?(live.openR>=0?'+':'')+live.openR.toFixed(2)+'R':'')}
+       : {k:'5m OB LIMIT', c:'off', i:'○', v:side+' · 3R · $35'};
+  } else {
+    const z = allowed[0];
+    s2 = {k:'1H OB', c:'now', i:'…', v: z ? 'Not tapped\n'+f0(z.lo)+'–'+f0(z.hi)+' ('+((z.d<0?z.lo:z.hi)>g.price?'+':'−')+'$'+f0(Math.abs((z.d<0?z.lo:z.hi)-g.price))+')' : 'No fresh zone yet'};
+    s3 = {k:'15m CHoCH', c:'off', i:'○', v:'Waiting'};
+    s4 = {k:'5m OB LIMIT', c:'off', i:'○', v:side+' · 3R · $35'};
+  }
+  const badge = live && live.state === 'order set' ? ['ORDER SET','var(--accent)'] : live && live.state === 'filled' ? ['IN TRADE','var(--bull)'] : live ? ['SETUP FORMING','var(--warn)'] : ['WAIT — no setup','var(--warn)'];
+  return {badge: badge, html: '<div class="gold-steps">'+[s1,s2,s3,s4].map(function(s){ return '<div class="gold-step '+s.c+'"><div class="k">'+s.i+'  '+s.k+'</div><div class="v">'+tvEsc(s.v)+'</div></div>'; }).join('')+'</div>', dd: dd};
+}
 function renderGold(g){
   const el = $('tvGold'); if(!el) return;
   if(!g){ el.innerHTML = ''; return; }
@@ -2045,8 +2151,12 @@ function renderGold(g){
     }
     return '<div class="gold-row">'+lines+'</div>';
   }).join('');
-  el.innerHTML = '<div class="gold-card"><div class="gold-h"><span class="gt">XAUUSD · GOLD SETUP (1H → 15m → 5m)</span>'+
-    tvButton('XAUUSD')+(g.price!=null?'<span style="font-size:11px;color:var(--text2)">'+f(g.price)+' @'+tvTime(g.at+300).slice(-5)+'</span>':'')+'</div>'+
+  const ST = goldSteps(g);
+  el.innerHTML = '<div class="gold-card"><div class="gold-h"><span class="gt">XAUUSD · 1H → 15m → 5m</span>'+
+    tvButton('XAUUSD')+'<span class="gold-badge" style="background:'+ST.badge[1]+'">'+ST.badge[0]+'</span>'+
+    (ST.dd ? '<span class="gold-bias" style="color:'+(ST.dd<0?'var(--bear)':'var(--bull)')+'">Bias: '+(ST.dd<0?'SELLS ONLY ▼':'BUYS ONLY ▲')+'</span>' : '')+
+    (g.price!=null?'<span style="font-size:11px;color:var(--text2);margin-left:auto">'+f(g.price)+' @'+tvTime(g.at+300).slice(-5)+'</span>':'')+'</div>'+
+    goldChart(g)+ST.html+
     '<div class="gold-rule">'+tvEsc(g.rule||'')+'. Last 36h shown. $35 risk per trade (0.01 lot = 1 oz). Backtest: about +0.4–0.7R a trade over 5 months (22–23 trades) — still being tested.</div>'+
     (rows || '<div class="gold-row">No 1H order-block touch in the last 36 hours.</div>')+'</div>';
 }
