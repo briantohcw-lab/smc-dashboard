@@ -394,6 +394,9 @@
   .tv-watch-row .wp{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--text)}
   .tv-watch-row .wb{color:var(--warn);font-weight:600}
   .tv-top .tv-btn{font-size:10px;padding:3px 7px}
+  .legacy-bar{padding:14px 0 4px}
+  .legacy-btn{background:var(--panel2);color:var(--text2);border:1px solid var(--border2);border-radius:8px;padding:9px 14px;font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer;width:100%;text-align:left}
+  .legacy-btn:hover{color:var(--text);border-color:var(--accent)}
   .gold-viz{display:grid;grid-template-columns:auto 1fr auto;gap:8px 14px;align-items:center;margin:4px 0 8px}
   .gold-badge{font-weight:800;font-size:12px;letter-spacing:.05em;padding:4px 10px;border-radius:6px;color:#0d1117}
   .gold-bias{font-weight:700;font-size:12px}
@@ -691,7 +694,8 @@
   </section>
 
   <!-- Old scanner sections, hidden at Brian's request (25 Nov 2026): kept in the page so the scripts that fill them still work. -->
-  <div id="legacySections" hidden style="display:none">
+  <div class="legacy-bar"><button id="legacyToggle" class="legacy-btn" type="button">▸ SHOW OLD SECTIONS (matrix, setups, armed, TA, trades, watchlist, history)</button></div>
+  <div id="legacySections" style="display:none">
   <section>
     <div class="sec-head" style="color:var(--accent)"><span class="bar" style="background:var(--accent)"></span>▦ ALL PAIRS — CONDITION MATRIX<span class="sec-count" id="c-mx">0</span></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -3188,6 +3192,17 @@ wireControls();
 refreshAll();
 setInterval(refreshAll, 15000);
 setInterval(updateClock, 1000);
+
+// Old sections: hidden by default, toggle remembered per browser
+(function(){
+  const btn = document.getElementById('legacyToggle'), box = document.getElementById('legacySections');
+  if(!btn || !box) return;
+  const LBL = ' OLD SECTIONS (matrix, setups, armed, TA, trades, watchlist, history)';
+  function set(open){ box.style.display = open ? '' : 'none'; btn.textContent = (open ? '▾ HIDE' : '▸ SHOW') + LBL; try{ localStorage.setItem('smcLegacyOpen', open ? '1' : '0'); }catch(e){} }
+  let open = false; try{ open = localStorage.getItem('smcLegacyOpen') === '1'; }catch(e){}
+  set(open);
+  btn.addEventListener('click', function(){ set(box.style.display === 'none'); });
+})();
 </script>
 </body>
 </html>
