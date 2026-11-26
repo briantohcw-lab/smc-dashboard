@@ -791,9 +791,14 @@ function setText(id,txt){ const e=$(id); if(e) e.textContent=txt; }
 
 // ---- TradingView deep link ----
 const TV_PREFIX = {EURCHF:'OANDA',NZDCAD:'OANDA',XAUUSD:'OANDA',NZDCHF:'CAPITALCOM',NZDJPY:'CAPITALCOM',NZDUSD:'CAPITALCOM',BTCUSD:'COINBASE'};
+const TV_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent||'');
 function tvLink(pair){
   const p = String(pair||'').replace('/','').toUpperCase();
-  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent((TV_PREFIX[p]||(p.indexOf('XAU')>=0?'OANDA':'FX'))+':'+p)+'&interval=15';
+  const ex = TV_PREFIX[p]||(p.indexOf('XAU')>=0?'OANDA':'FX');
+  // The TradingView phone app ignores ?symbol= on /chart/ links and opens the last chart,
+  // but it does open /symbols/<EXCHANGE>-<PAIR>/ on the right pair. Desktop keeps the full 15m chart.
+  if(TV_MOBILE) return 'https://www.tradingview.com/symbols/'+ex+'-'+p+'/';
+  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(ex+':'+p)+'&interval=15';
 }
 function tvButton(pair){
   return '<a class="tv-btn" href="'+tvLink(pair)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">📈 TV</a>';
